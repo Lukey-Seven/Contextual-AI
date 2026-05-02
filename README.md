@@ -1,41 +1,37 @@
 # Contextual AI Guide 🎨🤖
 
-Contextual AI is an intelligent visual assistant designed for visual learners who find complex software interfaces overwhelming[cite: 1, 5]. Instead of reading long manuals, you can get an AI-powered overlay directly on top of any software you are using[cite: 5].
+Contextual AI is an intelligent visual assistant designed for visual learners who find complex software interfaces overwhelming. Instead of reading long manuals, you can get an AI-powered overlay directly on top of any software you are using.
 
 ## Features
-*   **Global Overlay:** Works on top of any application (VS Code, Blender, Adobe Suite, etc.)[cite: 5].
-*   **Instant Activation:** Use the **Ctrl+Shift+Q** shortcut to trigger the AI analysis[cite: 5].
-*   **Smart Guidance:** Uses **Gemini 3 Flash** to generate step-by-step visual instructions based on your screenshot[cite: 2, 5].
-*   **Integrated Search:** Provides direct links to YouTube and Web documentation for every identified step[cite: 3, 5].
+*   **Global Overlay:** Works on top of any application (Maya, Blender, Adobe Affter Effects, etc.).
+*   **Instant Activation:** Use the **Ctrl+Shift+Q** shortcut to trigger the AI analysis.
+*   **Smart Guidance:** Uses **Gemini 3 Flash** to generate step-by-step visual instructions based on your screenshot.
+*   **Integrated Search:** Provides direct links to YouTube and Web documentation for every identified step.
 
 ## How to Run
-1.  Ensure you have **Python 3.x** installed[cite: 5].
+1.  Ensure you have **Python 3.x** installed.
 2.  Install required libraries:
-    `pip install pyautogui requests keyboard pillow`[cite: 5].
+    `pip install pyautogui requests keyboard pillow`.
 3.  Run the application:
-    `python contextual_ai_app.py`[cite: 5].
-4.  Open any software you want to learn, and press **Ctrl+Shift+Q**[cite: 5].
+    `python contextual_ai_app.py`.
+4.  Open any software you want to learn, and press **Ctrl+Shift+Q**.
 
 ---
 
 # Contextual AI Guide (Tiếng Việt) 🎨🤖
 
-Contextual AI là trợ lý thị giác thông minh được thiết kế cho những người học qua hình ảnh (visual learners), giúp đơn giản hóa các giao diện phần mềm phức tạp[cite: 1, 5]. Thay vì đọc các tài liệu dài dòng, bạn sẽ nhận được một lớp hướng dẫn do AI tạo ra trực tiếp trên phần mềm đang sử dụng[cite: 5].
+Contextual AI là trợ lý thị giác thông minh được thiết kế cho những người học qua hình ảnh (visual learners), giúp đơn giản hóa các giao diện phần mềm phức tạp. Thay vì đọc các tài liệu dài dòng, bạn sẽ nhận được một lớp hướng dẫn do AI tạo ra trực tiếp trên phần mềm đang sử dụng.
 
 ## Tính năng chính
-*   **Lớp phủ toàn cầu (Global Overlay):** Hoạt động trên mọi ứng dụng (VS Code, Blender, Adobe Suite, v.v.)[cite: 5].
-*   **Kích hoạt tức thì:** Sử dụng tổ hợp phím **Ctrl+Shift+Q** để bắt đầu phân tích[cite: 5].
-*   **Chỉ dẫn thông minh:** Sử dụng **Gemini 3 Flash** để tạo hướng dẫn trực quan từng bước dựa trên ảnh chụp màn hình của bạn[cite: 2, 5].
-*   **Tìm kiếm tích hợp:** Cung cấp link trực tiếp đến YouTube và tài liệu Web cho từng bước hướng dẫn[cite: 3, 5].
+*   **Lớp phủ toàn cầu (Global Overlay):** Hoạt động trên mọi ứng dụng (Maya, Blender, Adobe Affter Effects, v.v.).
+*   **Kích hoạt tức thì:** Sử dụng tổ hợp phím **Ctrl+Shift+Q** để bắt đầu phân tích.
+*   **Chỉ dẫn thông minh:** Sử dụng **Gemini 3 Flash** để tạo hướng dẫn trực quan từng bước dựa trên ảnh chụp màn hình của bạn.
+*   **Tìm kiếm tích hợp:** Cung cấp link trực tiếp đến YouTube và tài liệu Web cho từng bước hướng dẫn.
 
 ## Cách cài đặt và sử dụng
-1.  Đảm bảo máy bạn đã cài đặt **Python 3.x**[cite: 5].
+1.  Đảm bảo máy bạn đã cài đặt **Python 3.x**.
 2.  Cài đặt các thư viện cần thiết:
-    `pip install pyautogui requests keyboard pillow`[cite: 5].
+    `pip install pyautogui requests keyboard pillow`.
 3.  Chạy ứng dụng:
-    `python contextual_ai_app.py`[cite: 5].
-4.  Mở bất kỳ phần mềm nào bạn muốn học, và nhấn **Ctrl+Shift+Q**[cite: 5].
-
----
-
-**Note:** The API quota is shared and provided by the me, so you don't need your own keys for now.
+    `python contextual_ai_app.py`.
+4.  Mở bất kỳ phần mềm nào bạn muốn học, và nhấn **Ctrl+Shift+Q**.
