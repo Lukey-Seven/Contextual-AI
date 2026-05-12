@@ -13,6 +13,7 @@ import os
 import json
 import re
 import webbrowser
+import time
 from PIL import Image, ImageTk, ImageDraw
 
 # --- CONFIGURATION ---
@@ -123,10 +124,10 @@ def execute_analysis(user_prompt, image_obj, snip_coords, screen_size, previous_
         
         proxy_url = "https://dms.onl/s4106115/proxy.php" 
         
-        # Context formulation
+        # Formulate chained context string
         actual_prompt = user_prompt
         if previous_context:
-            actual_prompt = f"[Previous Action: {previous_context}] Now, looking at this NEW screenshot: {user_prompt}"
+            actual_prompt = f"[Previous Step Context: {previous_context}] User's Next Question: {user_prompt}"
         
         payload = {
             "image": img_b64,
@@ -171,7 +172,6 @@ def execute_analysis(user_prompt, image_obj, snip_coords, screen_size, previous_
                     history_data = json.load(f)
             
             if is_continuation and current_session_history_idx != -1 and current_session_history_idx < len(history_data):
-                # Append as sub-step to the original parent item
                 if "sub_steps" not in history_data[current_session_history_idx]:
                     history_data[current_session_history_idx]["sub_steps"] =[]
                 history_data[current_session_history_idx]["sub_steps"].append({
@@ -180,13 +180,11 @@ def execute_analysis(user_prompt, image_obj, snip_coords, screen_size, previous_
                     "image": img_b64
                 })
             else:
-                # Create a fresh new parent entry
                 history_data.append({
                     "prompt": user_prompt,
                     "data": data,
                     "image": img_b64
                 })
-                # Update pointer to this new entry
                 current_session_history_idx = len(history_data) - 1
             
             with open(history_file, 'w', encoding='utf-8') as f:
@@ -238,7 +236,6 @@ canvas = tk.Canvas(root, bg=bg_color, highlightthickness=0)
 canvas.pack(fill='both', expand=True)
 
 def reset_to_prompt():
-    """Resets the overlay and goes back to the prompt window."""
     global side_panel, loading_panel, disclosure_win, initial_screenshot
     global current_session_history_idx, last_user_prompt
     
@@ -262,13 +259,13 @@ def reset_to_prompt():
 def show_history_window():
     hist_win = tk.Toplevel(root)
     hist_win.title("Local History")
-    hist_win.geometry("500x400")
+    hist_win.geometry("500x500")
     hist_win.configure(bg="#111827")
     hist_win.attributes('-topmost', True)
     hist_win.overrideredirect(True)
     
     x = (root.winfo_screenwidth() // 2) - 250
-    y = (root.winfo_screenheight() // 2) - 200
+    y = (root.winfo_screenheight() // 2) - 250
     hist_win.geometry(f"+{x}+{y}")
     
     header = tk.Frame(hist_win, bg="#111827", cursor="fleur")
@@ -305,37 +302,72 @@ def show_history_window():
     hist_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
     scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
     
+    def load_item(idx, item_data, img_b64, p_text):
+        global initial_screenshot, current_session_history_idx, last_user_prompt
+        current_session_history_idx = idx
+        last_user_prompt = p_text
+        if img_b64:
+            try:
+                img_bytes = base64.b64decode(img_b64)
+                initial_screenshot = Image.open(io.BytesIO(img_bytes))
+            except Exception as e:
+                print("Error loading image from history:", e)
+        hist_win.destroy()
+        draw_overlay(item_data)
+        
+    def make_toggle(frm, has_subs):
+        def toggle():
+            if not has_subs: return
+            if frm.winfo_ismapped():
+                frm.pack_forget()
+            else:
+                frm.pack(fill=tk.X, pady=(0, 5))
+        return toggle
+
     try:
         if os.path.exists("saved_history.json"):
             with open("saved_history.json", 'r', encoding='utf-8') as f:
                 history_data = json.load(f)
                 
             for i, item in reversed(list(enumerate(history_data))):
+                session_frame = tk.Frame(scrollable_frame, bg="#111827")
+                session_frame.pack(fill=tk.X, pady=5)
+                
+                main_row = tk.Frame(session_frame, bg="#374151")
+                main_row.pack(fill=tk.X)
+                
+                sub_steps = item.get("sub_steps",[])
+                has_subs = len(sub_steps) > 0
+                prefix = "▼ " if has_subs else "📄 "
                 prompt_text = item.get("prompt", "Unknown query")
                 
-                def load_item(idx=i, item_data=item.get("data"), img_b64=item.get("image"), p_text=prompt_text):
-                    global initial_screenshot, current_session_history_idx, last_user_prompt
-                    
-                    # Setup global tracking for future continuations of this loaded item
-                    current_session_history_idx = idx
-                    last_user_prompt = p_text
-                    
-                    if img_b64:
-                        try:
-                            img_bytes = base64.b64decode(img_b64)
-                            initial_screenshot = Image.open(io.BytesIO(img_bytes))
-                        except Exception as e:
-                            print("Error loading image from history:", e)
-                    
-                    hist_win.destroy()
-                    draw_overlay(item_data)
+                sub_frame = tk.Frame(session_frame, bg="#111827")
                 
-                btn = tk.Button(scrollable_frame, text=prompt_text, bg="#1F2937", fg="white", font=("Arial", 11), relief=tk.FLAT, cursor="hand2", anchor="w", padx=10, pady=8, command=lambda idx=i, data=item.get("data"), img=item.get("image"), pt=prompt_text: load_item(idx, data, img, pt))
-                btn.pack(fill=tk.X, pady=5)
+                toggle_btn = tk.Button(main_row, text=prefix + prompt_text, bg="#374151", fg="white", font=("Arial", 11), relief=tk.FLAT, cursor="hand2", anchor="w", command=make_toggle(sub_frame, has_subs))
+                toggle_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=10, pady=8)
+                
+                load_btn = tk.Button(main_row, text="Load", bg="#10B981", fg="white", font=("Arial", 9, "bold"), relief=tk.FLAT, cursor="hand2", command=lambda idx=i, d=item.get("data"), img=item.get("image"), pt=prompt_text: load_item(idx, d, img, pt))
+                load_btn.pack(side=tk.RIGHT, padx=10, pady=8)
+                
+                # Render sub-steps (hidden by default)
+                for sub_i, sub in enumerate(sub_steps):
+                    sub_row = tk.Frame(sub_frame, bg="#1F2937")
+                    sub_row.pack(fill=tk.X, padx=(30, 0), pady=(0, 2))
+                    
+                    sub_prompt = sub.get("prompt", "Unknown sub-query")
+                    tk.Label(sub_row, text="↳ " + sub_prompt, bg="#1F2937", fg="#D1D5DB", font=("Arial", 10), anchor="w").pack(side=tk.LEFT, fill=tk.X, expand=True, padx=10, pady=6)
+                    
+                    sub_load = tk.Button(sub_row, text="Load", bg="#3B82F6", fg="white", font=("Arial", 9, "bold"), relief=tk.FLAT, cursor="hand2", command=lambda idx=i, d=sub.get("data"), img=sub.get("image"), pt=sub_prompt: load_item(idx, d, img, pt))
+                    sub_load.pack(side=tk.RIGHT, padx=10, pady=6)
         else:
             tk.Label(scrollable_frame, text="No history found.", bg="#111827", fg="#D1D5DB", font=("Arial", 11)).pack(pady=20)
     except Exception as e:
         tk.Label(scrollable_frame, text=f"Error loading history: {e}", bg="#111827", fg="#EF4444", font=("Arial", 11)).pack(pady=20)
+
+    # Enable mouse wheel
+    def _on_mousewheel(event):
+        hist_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+    hist_canvas.bind_all("<MouseWheel>", _on_mousewheel)
 
 
 # ==========================================
@@ -397,7 +429,6 @@ def show_prompt_window():
     entry.pack(fill=tk.X, padx=20, pady=5, ipady=8)
     entry.focus()
     
-    # 2-Row Layout for cleaner UI
     btn_frame1 = tk.Frame(prompt_win, bg="#111827")
     btn_frame1.pack(fill=tk.X, padx=20, pady=(15, 5))
     
@@ -441,7 +472,6 @@ def show_prompt_window():
                     initial_screenshot = Image.open(io.BytesIO(img_bytes))
                     prompt_win.destroy()
                     root.deiconify()
-                    # Do not append imported items to ongoing local history tracker to avoid corruption
                     current_session_history_idx = -1 
                     draw_overlay(data)
             except Exception as e:
@@ -451,12 +481,10 @@ def show_prompt_window():
         prompt_win.destroy()
         begin_quick_inspect()
 
-    # ROW 1
     tk.Button(btn_frame1, text=t("cancel"), bg="#EF4444", fg="white", font=("Arial", 10, "bold"), relief=tk.FLAT, command=on_cancel, cursor="hand2", padx=10, pady=5).pack(side=tk.LEFT)
     tk.Button(btn_frame1, text=t("locate"), bg="#00ffcc", fg="black", font=("Arial", 10, "bold"), relief=tk.FLAT, command=on_locate, cursor="hand2", padx=10, pady=5).pack(side=tk.RIGHT, padx=(10,0))
     tk.Button(btn_frame1, text=t("snip"), bg="#374151", fg="white", font=("Arial", 10, "bold"), relief=tk.FLAT, command=on_snip, cursor="hand2", padx=10, pady=5).pack(side=tk.RIGHT)
 
-    # ROW 2
     tk.Button(btn_frame2, text="View History", bg="#8B5CF6", fg="white", font=("Arial", 10, "bold"), relief=tk.FLAT, command=open_history, cursor="hand2", padx=10, pady=5).pack(side=tk.LEFT)
     tk.Button(btn_frame2, text="Import Guide", bg="#10B981", fg="white", font=("Arial", 10, "bold"), relief=tk.FLAT, command=on_import, cursor="hand2", padx=10, pady=5).pack(side=tk.LEFT, padx=(10, 0))
     tk.Button(btn_frame2, text="Quick Inspect", bg="#F59E0B", fg="white", font=("Arial", 10, "bold"), relief=tk.FLAT, command=on_quick_inspect, cursor="hand2", padx=10, pady=5).pack(side=tk.RIGHT)
@@ -468,23 +496,24 @@ def show_prompt_window():
 def show_continue_window():
     global prompt_win, initial_screenshot
     
-    # Take a brand new screenshot for the continuation context
+    # Ensure visual overlays are cleared before screenshot
+    root.update()
+    time.sleep(0.2)
     initial_screenshot = pyautogui.screenshot()
     
     prompt_win = tk.Toplevel(root)
     prompt_win.title("Continue Guide")
-    prompt_win.geometry("560x220")
+    prompt_win.geometry("500x450")
     prompt_win.configure(bg="#111827")
     prompt_win.attributes('-topmost', True)
     prompt_win.overrideredirect(True)
     
-    x = (root.winfo_screenwidth() // 2) - 280
-    y = (root.winfo_screenheight() // 2) - 110
+    x = (root.winfo_screenwidth() // 2) - 250
+    y = (root.winfo_screenheight() // 2) - 225
     prompt_win.geometry(f"+{x}+{y}")
     
-    # Header
     header_frame = tk.Frame(prompt_win, bg="#111827", cursor="fleur")
-    header_frame.pack(fill=tk.X, padx=20, pady=(15, 0))
+    header_frame.pack(fill=tk.X, padx=20, pady=(15, 10))
     
     def start_move(e): prompt_win.x, prompt_win.y = e.x, e.y
     def stop_move(e): prompt_win.x = prompt_win.y = None
@@ -494,20 +523,50 @@ def show_continue_window():
     header_frame.bind("<ButtonRelease-1>", stop_move)
     header_frame.bind("<B1-Motion>", do_move)
     
-    title_lbl = tk.Label(header_frame, text="What is the next step?", bg="#111827", fg="#3B82F6", font=("Arial", 16, "bold"), cursor="fleur")
-    title_lbl.pack(side=tk.LEFT)
-    title_lbl.bind("<ButtonPress-1>", start_move)
-    title_lbl.bind("<ButtonRelease-1>", stop_move)
-    title_lbl.bind("<B1-Motion>", do_move)
+    tk.Label(header_frame, text="What is the next step?", bg="#111827", fg="#3B82F6", font=("Arial", 16, "bold"), cursor="fleur").pack(side=tk.LEFT)
+    
+    # Image Preview & Retake Row
+    img_frame = tk.Frame(prompt_win, bg="#111827")
+    img_frame.pack(fill=tk.X, padx=20, pady=10)
+    
+    img_lbl = tk.Label(img_frame, bg="#1F2937", bd=2, relief=tk.SOLID)
+    img_lbl.pack(side=tk.LEFT, expand=True)
+    
+    def update_thumbnail():
+        if not initial_screenshot: return
+        thumb = initial_screenshot.copy()
+        max_w = 360
+        max_h = 220
+        ratio = min(max_w/float(thumb.width), max_h/float(thumb.height))
+        new_w = int(thumb.width * ratio)
+        new_h = int(thumb.height * ratio)
+        thumb = thumb.resize((new_w, new_h), Image.Resampling.LANCZOS)
+        tk_thumb = ImageTk.PhotoImage(thumb)
+        img_lbl.config(image=tk_thumb)
+        img_lbl.image = tk_thumb
+        
+    update_thumbnail()
+    
+    def retake_screenshot():
+        global initial_screenshot
+        prompt_win.withdraw()
+        prompt_win.update()
+        time.sleep(0.3)
+        initial_screenshot = pyautogui.screenshot()
+        update_thumbnail()
+        prompt_win.deiconify()
+        
+    retake_btn = tk.Button(img_frame, text="Retake\nScreenshot", bg="#F59E0B", fg="white", font=("Arial", 9, "bold"), command=retake_screenshot, cursor="hand2")
+    retake_btn.pack(side=tk.RIGHT, padx=10)
     
     entry = tk.Entry(prompt_win, font=("Arial", 14), bg="#1F2937", fg="white", insertbackground="white", relief=tk.FLAT)
-    entry.pack(fill=tk.X, padx=20, pady=20, ipady=8)
+    entry.pack(fill=tk.X, padx=20, pady=(10, 20), ipady=8)
     entry.focus()
     
     btn_frame = tk.Frame(prompt_win, bg="#111827")
     btn_frame.pack(fill=tk.X, padx=20, pady=(0, 10))
     
-    def on_locate():
+    def on_analyze():
         text = entry.get().strip()
         if text:
             prompt_win.destroy()
@@ -520,7 +579,7 @@ def show_continue_window():
         reset_to_prompt()
         
     tk.Button(btn_frame, text="Cancel", bg="#EF4444", fg="white", font=("Arial", 10, "bold"), relief=tk.FLAT, command=on_cancel, cursor="hand2", padx=10, pady=5).pack(side=tk.LEFT)
-    tk.Button(btn_frame, text="Locate", bg="#00ffcc", fg="black", font=("Arial", 10, "bold"), relief=tk.FLAT, command=on_locate, cursor="hand2", padx=10, pady=5).pack(side=tk.RIGHT)
+    tk.Button(btn_frame, text="Analyze", bg="#00ffcc", fg="black", font=("Arial", 10, "bold"), relief=tk.FLAT, command=on_analyze, cursor="hand2", padx=10, pady=5).pack(side=tk.RIGHT)
 
 def begin_quick_inspect():
     global snip_win
@@ -538,7 +597,6 @@ def begin_quick_inspect():
     def on_click(e):
         snip_win.destroy()
         
-        # Define 150x150 boundary (bound to screen edges)
         x1 = max(0, e.x - 75)
         y1 = max(0, e.y - 75)
         x2 = min(root.winfo_screenwidth(), e.x + 75)
@@ -727,7 +785,6 @@ def animate_spotlight():
 def highlight_box(selected_idx):
     global active_spotlight_idx
     
-    # Toggle Mechanism
     if active_spotlight_idx == selected_idx:
         active_spotlight_idx = -1
         for item in drawn_rectangles:
@@ -745,7 +802,6 @@ def highlight_box(selected_idx):
                 card_dict['btns_frame'].configure(bg="#1F2937")
         return
 
-    # Normal Activation
     active_spotlight_idx = selected_idx
     
     for i, item in enumerate(drawn_rectangles):
@@ -831,7 +887,6 @@ def draw_overlay(data):
     side_panel.attributes('-topmost', True)
     side_panel.overrideredirect(True)
     
-    # --- RESIZABLE BORDER ---
     resizer = tk.Frame(side_panel, bg="#374151", width=5, cursor="sb_h_double_arrow")
     resizer.pack(side=tk.LEFT, fill=tk.Y)
     
@@ -850,7 +905,6 @@ def draw_overlay(data):
     resizer.bind("<ButtonPress-1>", start_resize)
     resizer.bind("<B1-Motion>", do_resize)
     
-    # --- MAIN CONTENT WRAPPER ---
     main_content = tk.Frame(side_panel, bg="#111827")
     main_content.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
     
