@@ -1,6 +1,7 @@
 import tkinter as tk
 from tkinter import ttk
 import tkinter.filedialog as filedialog
+import tkinter.messagebox as messagebox
 import keyboard
 import pyautogui
 import requests
@@ -315,6 +316,24 @@ def show_history_window():
         hist_win.destroy()
         draw_overlay(item_data)
         
+    def delete_item(idx):
+        if messagebox.askyesno("Delete", "Are you sure you want to delete this guide and all its sub-steps?"):
+            try:
+                if os.path.exists("saved_history.json"):
+                    with open("saved_history.json", 'r', encoding='utf-8') as f:
+                        history_data = json.load(f)
+                    
+                    if 0 <= idx < len(history_data):
+                        del history_data[idx]
+                        
+                        with open("saved_history.json", 'w', encoding='utf-8') as f:
+                            json.dump(history_data, f, ensure_ascii=False, indent=2)
+                        
+                        hist_win.destroy()
+                        show_history_window()
+            except Exception as e:
+                print(f"Error deleting history: {e}")
+
     def make_toggle(frm, has_subs):
         def toggle():
             if not has_subs: return
@@ -346,8 +365,11 @@ def show_history_window():
                 toggle_btn = tk.Button(main_row, text=prefix + prompt_text, bg="#374151", fg="white", font=("Arial", 11), relief=tk.FLAT, cursor="hand2", anchor="w", command=make_toggle(sub_frame, has_subs))
                 toggle_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=10, pady=8)
                 
+                delete_btn = tk.Button(main_row, text="✖", bg="#EF4444", fg="white", font=("Arial", 9, "bold"), relief=tk.FLAT, cursor="hand2", command=lambda idx=i: delete_item(idx))
+                delete_btn.pack(side=tk.RIGHT, padx=(0, 10), pady=8)
+                
                 load_btn = tk.Button(main_row, text="Load", bg="#10B981", fg="white", font=("Arial", 9, "bold"), relief=tk.FLAT, cursor="hand2", command=lambda idx=i, d=item.get("data"), img=item.get("image"), pt=prompt_text: load_item(idx, d, img, pt))
-                load_btn.pack(side=tk.RIGHT, padx=10, pady=8)
+                load_btn.pack(side=tk.RIGHT, padx=(10, 5), pady=8)
                 
                 # Render sub-steps (hidden by default)
                 for sub_i, sub in enumerate(sub_steps):
@@ -383,23 +405,20 @@ def show_prompt_window():
         
     prompt_win = tk.Toplevel(root)
     prompt_win.title("Blueprint Lens")
-    prompt_win.geometry("620x300")
+    prompt_win.geometry("640x360")
     prompt_win.configure(bg="#111827")
     prompt_win.attributes('-topmost', True)
     prompt_win.overrideredirect(True)
     
-    x = (root.winfo_screenwidth() // 2) - 310
-    y = (root.winfo_screenheight() // 2) - 150
+    x = (root.winfo_screenwidth() // 2) - 320
+    y = (root.winfo_screenheight() // 2) - 180
     prompt_win.geometry(f"+{x}+{y}")
     
-    lang_var = tk.StringVar(value=current_lang)
-    def switch_lang(*args):
+    def toggle_lang():
         global current_lang
-        current_lang = lang_var.get()
+        current_lang = "VI" if current_lang == "EN" else "EN"
         prompt_win.destroy()
         show_prompt_window()
-        
-    lang_var.trace("w", switch_lang)
 
     header_frame = tk.Frame(prompt_win, bg="#111827", cursor="fleur")
     header_frame.pack(fill=tk.X, padx=20, pady=(15, 0))
@@ -418,22 +437,23 @@ def show_prompt_window():
     title_lbl.bind("<ButtonRelease-1>", stop_move)
     title_lbl.bind("<B1-Motion>", do_move)
 
-    lang_menu = ttk.Combobox(header_frame, textvariable=lang_var, values=["EN", "VI"], state="readonly", width=4)
-    lang_menu.pack(side=tk.RIGHT)
+    lang_btn = tk.Button(header_frame, text=f"🌐 {current_lang}", bg="#3B82F6", fg="white", font=("Arial", 10, "bold"), relief=tk.FLAT, command=toggle_lang, cursor="hand2")
+    lang_btn.pack(side=tk.RIGHT)
     
-    tk.Label(prompt_win, text=t("instruction"), bg="#111827", fg="#9CA3AF", font=("Arial", 11), wraplength=550, justify=tk.LEFT).pack(padx=20, pady=(10, 15), anchor="w")
+    tk.Label(prompt_win, text=t("instruction"), bg="#111827", fg="#9CA3AF", font=("Arial", 11), wraplength=550, justify=tk.LEFT).pack(padx=20, pady=(10, 10), anchor="w")
     
-    entry = tk.Entry(prompt_win, font=("Arial", 14), bg="#1F2937", fg="white", insertbackground="white", relief=tk.FLAT)
+    entry = tk.Entry(prompt_win, font=("Arial", 16), bg="#1F2937", fg="white", insertbackground="white", relief=tk.FLAT)
     entry.insert(0, t("placeholder"))
     entry.bind("<FocusIn>", lambda e: entry.delete(0, tk.END) if entry.get() == t("placeholder") else None)
-    entry.pack(fill=tk.X, padx=20, pady=5, ipady=8)
+    entry.pack(fill=tk.X, padx=20, pady=10, ipady=12)
     entry.focus()
     
+    # 2-Row Layout for cleaner UI hierarchy
     btn_frame1 = tk.Frame(prompt_win, bg="#111827")
-    btn_frame1.pack(fill=tk.X, padx=20, pady=(15, 5))
+    btn_frame1.pack(fill=tk.X, padx=15, pady=(15, 5))
     
     btn_frame2 = tk.Frame(prompt_win, bg="#111827")
-    btn_frame2.pack(fill=tk.X, padx=20, pady=(5, 10))
+    btn_frame2.pack(fill=tk.X, padx=15, pady=(5, 15))
     
     def on_locate():
         text = entry.get().strip()
@@ -481,13 +501,15 @@ def show_prompt_window():
         prompt_win.destroy()
         begin_quick_inspect()
 
-    tk.Button(btn_frame1, text=t("cancel"), bg="#EF4444", fg="white", font=("Arial", 10, "bold"), relief=tk.FLAT, command=on_cancel, cursor="hand2", padx=10, pady=5).pack(side=tk.LEFT)
-    tk.Button(btn_frame1, text=t("locate"), bg="#00ffcc", fg="black", font=("Arial", 10, "bold"), relief=tk.FLAT, command=on_locate, cursor="hand2", padx=10, pady=5).pack(side=tk.RIGHT, padx=(10,0))
-    tk.Button(btn_frame1, text=t("snip"), bg="#374151", fg="white", font=("Arial", 10, "bold"), relief=tk.FLAT, command=on_snip, cursor="hand2", padx=10, pady=5).pack(side=tk.RIGHT)
+    # PRIMARY ACTIONS (Row 1)
+    tk.Button(btn_frame1, text=t("cancel"), bg="#EF4444", fg="white", font=("Arial", 12, "bold"), relief=tk.FLAT, command=on_cancel, cursor="hand2", pady=10).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=5)
+    tk.Button(btn_frame1, text=t("snip"), bg="#374151", fg="white", font=("Arial", 12, "bold"), relief=tk.FLAT, command=on_snip, cursor="hand2", pady=10).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=5)
+    tk.Button(btn_frame1, text=t("locate"), bg="#00ffcc", fg="black", font=("Arial", 12, "bold"), relief=tk.FLAT, command=on_locate, cursor="hand2", pady=10).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=5)
 
-    tk.Button(btn_frame2, text="View History", bg="#8B5CF6", fg="white", font=("Arial", 10, "bold"), relief=tk.FLAT, command=open_history, cursor="hand2", padx=10, pady=5).pack(side=tk.LEFT)
-    tk.Button(btn_frame2, text="Import Guide", bg="#10B981", fg="white", font=("Arial", 10, "bold"), relief=tk.FLAT, command=on_import, cursor="hand2", padx=10, pady=5).pack(side=tk.LEFT, padx=(10, 0))
-    tk.Button(btn_frame2, text="Quick Inspect", bg="#F59E0B", fg="white", font=("Arial", 10, "bold"), relief=tk.FLAT, command=on_quick_inspect, cursor="hand2", padx=10, pady=5).pack(side=tk.RIGHT)
+    # SECONDARY ACTIONS (Row 2)
+    tk.Button(btn_frame2, text="View History", bg="#8B5CF6", fg="white", font=("Arial", 9, "bold"), relief=tk.FLAT, command=open_history, cursor="hand2", pady=6).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=5)
+    tk.Button(btn_frame2, text="Import Guide", bg="#10B981", fg="white", font=("Arial", 9, "bold"), relief=tk.FLAT, command=on_import, cursor="hand2", pady=6).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=5)
+    tk.Button(btn_frame2, text="Quick Inspect", bg="#F59E0B", fg="white", font=("Arial", 9, "bold"), relief=tk.FLAT, command=on_quick_inspect, cursor="hand2", pady=6).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=5)
 
 
 # ==========================================
