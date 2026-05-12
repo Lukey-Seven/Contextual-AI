@@ -29,6 +29,8 @@ step_cards =[]
 animation_active = False
 
 initial_screenshot = None
+current_session_history_idx = -1
+last_user_prompt = ""
 
 # --- LOCALIZATION DICTIONARY ---
 LANG_DICT = {
@@ -110,7 +112,8 @@ def load_and_display_image(url, label):
 # ==========================================
 # AI PROCESSING CORE
 # ==========================================
-def execute_analysis(user_prompt, image_obj, snip_coords, screen_size):
+def execute_analysis(user_prompt, image_obj, snip_coords, screen_size, previous_context=None, is_continuation=False):
+    global current_session_history_idx, last_user_prompt
     try:
         app_queue.put({"log": t("log_upload")})
         
@@ -120,10 +123,15 @@ def execute_analysis(user_prompt, image_obj, snip_coords, screen_size):
         
         proxy_url = "https://dms.onl/s4106115/proxy.php" 
         
+        # Context formulation
+        actual_prompt = user_prompt
+        if previous_context:
+            actual_prompt = f"[Previous Action: {previous_context}] Now, looking at this NEW screenshot: {user_prompt}"
+        
         payload = {
             "image": img_b64,
             "mimeType": "image/jpeg",
-            "prompt": user_prompt,
+            "prompt": actual_prompt,
             "hasHighlight": bool(snip_coords),
             "language": current_lang,
             "detailLevel": "detailed",
@@ -162,16 +170,32 @@ def execute_analysis(user_prompt, image_obj, snip_coords, screen_size):
                 with open(history_file, 'r', encoding='utf-8') as f:
                     history_data = json.load(f)
             
-            history_data.append({
-                "prompt": user_prompt,
-                "data": data,
-                "image": img_b64
-            })
+            if is_continuation and current_session_history_idx != -1 and current_session_history_idx < len(history_data):
+                # Append as sub-step to the original parent item
+                if "sub_steps" not in history_data[current_session_history_idx]:
+                    history_data[current_session_history_idx]["sub_steps"] =[]
+                history_data[current_session_history_idx]["sub_steps"].append({
+                    "prompt": user_prompt,
+                    "data": data,
+                    "image": img_b64
+                })
+            else:
+                # Create a fresh new parent entry
+                history_data.append({
+                    "prompt": user_prompt,
+                    "data": data,
+                    "image": img_b64
+                })
+                # Update pointer to this new entry
+                current_session_history_idx = len(history_data) - 1
             
             with open(history_file, 'w', encoding='utf-8') as f:
                 json.dump(history_data, f, ensure_ascii=False, indent=2)
+                
         except Exception as e:
             print(f"Failed to save history: {e}")
+            
+        last_user_prompt = user_prompt
         
         app_queue.put({"log": t("log_done")})
         app_queue.put({"data": data})
@@ -216,6 +240,8 @@ canvas.pack(fill='both', expand=True)
 def reset_to_prompt():
     """Resets the overlay and goes back to the prompt window."""
     global side_panel, loading_panel, disclosure_win, initial_screenshot
+    global current_session_history_idx, last_user_prompt
+    
     canvas.delete("all")
     root.withdraw()
     
@@ -224,6 +250,9 @@ def reset_to_prompt():
     if disclosure_win: disclosure_win.destroy(); disclosure_win = None
     
     initial_screenshot = None 
+    current_session_history_idx = -1
+    last_user_prompt = ""
+    
     show_prompt_window()
 
 
@@ -281,11 +310,16 @@ def show_history_window():
             with open("saved_history.json", 'r', encoding='utf-8') as f:
                 history_data = json.load(f)
                 
-            for item in reversed(history_data):
+            for i, item in reversed(list(enumerate(history_data))):
                 prompt_text = item.get("prompt", "Unknown query")
                 
-                def load_item(item_data=item.get("data"), img_b64=item.get("image")):
-                    global initial_screenshot
+                def load_item(idx=i, item_data=item.get("data"), img_b64=item.get("image"), p_text=prompt_text):
+                    global initial_screenshot, current_session_history_idx, last_user_prompt
+                    
+                    # Setup global tracking for future continuations of this loaded item
+                    current_session_history_idx = idx
+                    last_user_prompt = p_text
+                    
                     if img_b64:
                         try:
                             img_bytes = base64.b64decode(img_b64)
@@ -296,7 +330,7 @@ def show_history_window():
                     hist_win.destroy()
                     draw_overlay(item_data)
                 
-                btn = tk.Button(scrollable_frame, text=prompt_text, bg="#1F2937", fg="white", font=("Arial", 11), relief=tk.FLAT, cursor="hand2", anchor="w", padx=10, pady=8, command=lambda data=item.get("data"), img=item.get("image"): load_item(data, img))
+                btn = tk.Button(scrollable_frame, text=prompt_text, bg="#1F2937", fg="white", font=("Arial", 11), relief=tk.FLAT, cursor="hand2", anchor="w", padx=10, pady=8, command=lambda idx=i, data=item.get("data"), img=item.get("image"), pt=prompt_text: load_item(idx, data, img, pt))
                 btn.pack(fill=tk.X, pady=5)
         else:
             tk.Label(scrollable_frame, text="No history found.", bg="#111827", fg="#D1D5DB", font=("Arial", 11)).pack(pady=20)
@@ -399,14 +433,16 @@ def show_prompt_window():
                 with open(file_path, 'r', encoding='utf-8') as f:
                     imported_pkg = json.load(f)
                 
-                global initial_screenshot
+                global initial_screenshot, current_session_history_idx
                 img_b64 = imported_pkg.get("image")
                 data = imported_pkg.get("data")
                 if img_b64 and data:
                     img_bytes = base64.b64decode(img_b64)
                     initial_screenshot = Image.open(io.BytesIO(img_bytes))
                     prompt_win.destroy()
-                    root.deiconify() 
+                    root.deiconify()
+                    # Do not append imported items to ongoing local history tracker to avoid corruption
+                    current_session_history_idx = -1 
                     draw_overlay(data)
             except Exception as e:
                 print(f"Error importing guide: {e}")
@@ -427,8 +463,65 @@ def show_prompt_window():
 
 
 # ==========================================
-# UI: SNIPPING & QUICK INSPECT
+# UI: SNIPPING, QUICK INSPECT & CONTINUE
 # ==========================================
+def show_continue_window():
+    global prompt_win, initial_screenshot
+    
+    # Take a brand new screenshot for the continuation context
+    initial_screenshot = pyautogui.screenshot()
+    
+    prompt_win = tk.Toplevel(root)
+    prompt_win.title("Continue Guide")
+    prompt_win.geometry("560x220")
+    prompt_win.configure(bg="#111827")
+    prompt_win.attributes('-topmost', True)
+    prompt_win.overrideredirect(True)
+    
+    x = (root.winfo_screenwidth() // 2) - 280
+    y = (root.winfo_screenheight() // 2) - 110
+    prompt_win.geometry(f"+{x}+{y}")
+    
+    # Header
+    header_frame = tk.Frame(prompt_win, bg="#111827", cursor="fleur")
+    header_frame.pack(fill=tk.X, padx=20, pady=(15, 0))
+    
+    def start_move(e): prompt_win.x, prompt_win.y = e.x, e.y
+    def stop_move(e): prompt_win.x = prompt_win.y = None
+    def do_move(e): prompt_win.geometry(f"+{prompt_win.winfo_x() + (e.x - prompt_win.x)}+{prompt_win.winfo_y() + (e.y - prompt_win.y)}")
+
+    header_frame.bind("<ButtonPress-1>", start_move)
+    header_frame.bind("<ButtonRelease-1>", stop_move)
+    header_frame.bind("<B1-Motion>", do_move)
+    
+    title_lbl = tk.Label(header_frame, text="What is the next step?", bg="#111827", fg="#3B82F6", font=("Arial", 16, "bold"), cursor="fleur")
+    title_lbl.pack(side=tk.LEFT)
+    title_lbl.bind("<ButtonPress-1>", start_move)
+    title_lbl.bind("<ButtonRelease-1>", stop_move)
+    title_lbl.bind("<B1-Motion>", do_move)
+    
+    entry = tk.Entry(prompt_win, font=("Arial", 14), bg="#1F2937", fg="white", insertbackground="white", relief=tk.FLAT)
+    entry.pack(fill=tk.X, padx=20, pady=20, ipady=8)
+    entry.focus()
+    
+    btn_frame = tk.Frame(prompt_win, bg="#111827")
+    btn_frame.pack(fill=tk.X, padx=20, pady=(0, 10))
+    
+    def on_locate():
+        text = entry.get().strip()
+        if text:
+            prompt_win.destroy()
+            show_loading_ui()
+            screen_size = (root.winfo_screenwidth(), root.winfo_screenheight())
+            threading.Thread(target=execute_analysis, args=(text, initial_screenshot, None, screen_size, last_user_prompt, True), daemon=True).start()
+            
+    def on_cancel():
+        prompt_win.destroy()
+        reset_to_prompt()
+        
+    tk.Button(btn_frame, text="Cancel", bg="#EF4444", fg="white", font=("Arial", 10, "bold"), relief=tk.FLAT, command=on_cancel, cursor="hand2", padx=10, pady=5).pack(side=tk.LEFT)
+    tk.Button(btn_frame, text="Locate", bg="#00ffcc", fg="black", font=("Arial", 10, "bold"), relief=tk.FLAT, command=on_locate, cursor="hand2", padx=10, pady=5).pack(side=tk.RIGHT)
+
 def begin_quick_inspect():
     global snip_win
     snip_win = tk.Toplevel(root)
@@ -697,7 +790,7 @@ def draw_overlay(data):
         
     root.deiconify()
     canvas.delete("all")
-    drawn_rectangles =[]
+    drawn_rectangles = []
     step_cards =[]
     
     screen_w = root.winfo_screenwidth()
@@ -870,6 +963,12 @@ def draw_overlay(data):
             'title_lbl': title_lbl, 'btns_frame': btns_frame, 'desc_lbl': desc_lbl
         })
 
+    def on_continue():
+        side_panel.destroy()
+        canvas.delete("all")
+        root.withdraw()
+        show_continue_window()
+
     def on_export():
         file_path = filedialog.asksaveasfilename(defaultextension=".cguide", filetypes=[("Blueprint Lens Guide", "*.cguide")])
         if file_path:
@@ -889,6 +988,8 @@ def draw_overlay(data):
 
     footer = tk.Frame(main_content, bg="#111827")
     footer.pack(fill=tk.X, pady=10, padx=15)
+    
+    tk.Button(footer, text="Continue Guide", bg="#3B82F6", fg="white", font=("Arial", 10, "bold"), relief=tk.FLAT, command=on_continue, cursor="hand2", pady=5).pack(fill=tk.X, pady=(0, 5))
     tk.Button(footer, text="Export Guide", bg="#10B981", fg="white", font=("Arial", 10, "bold"), relief=tk.FLAT, command=on_export, cursor="hand2", pady=5).pack(fill=tk.X, pady=(0, 5))
     tk.Button(footer, text=t("done"), bg="#EF4444", fg="white", font=("Arial", 11, "bold"), relief=tk.FLAT, command=reset_to_prompt, cursor="hand2", pady=8).pack(fill=tk.X)
 
@@ -902,8 +1003,10 @@ def draw_overlay(data):
 
 
 def on_hotkey():
-    global initial_screenshot
+    global initial_screenshot, current_session_history_idx, last_user_prompt
     initial_screenshot = None
+    current_session_history_idx = -1
+    last_user_prompt = ""
     root.after(0, show_prompt_window)
 
 # Init
