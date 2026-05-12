@@ -1,6 +1,6 @@
-# Contextual AI Guide 🎨🤖
+# Blueprint Lens Guide 🎨🤖
 
-Contextual AI is an intelligent visual assistant designed for visual learners who find complex software interfaces overwhelming. Instead of reading long manuals, you can get an AI-powered overlay directly on top of any software you are using.
+Blueprint Lens is an intelligent visual assistant designed for visual learners who find complex software interfaces overwhelming. Instead of reading long manuals, you can get an AI-powered overlay directly on top of any software you are using.
 
 ## Features
 *   **Global Overlay:** Works on top of any application (Maya, Blender, Adobe Affter Effects, etc.).
@@ -18,9 +18,9 @@ Contextual AI is an intelligent visual assistant designed for visual learners wh
 
 ---
 
-# Contextual AI Guide (Tiếng Việt) 🎨🤖
+# Blueprint Lens Guide (Tiếng Việt) 🎨🤖
 
-Contextual AI là trợ lý thị giác thông minh được thiết kế cho những người học qua hình ảnh (visual learners), giúp đơn giản hóa các giao diện phần mềm phức tạp. Thay vì đọc các tài liệu dài dòng, bạn sẽ nhận được một lớp hướng dẫn do AI tạo ra trực tiếp trên phần mềm đang sử dụng.
+Blueprint Lens là trợ lý thị giác thông minh được thiết kế cho những người học qua hình ảnh (visual learners), giúp đơn giản hóa các giao diện phần mềm phức tạp. Thay vì đọc các tài liệu dài dòng, bạn sẽ nhận được một lớp hướng dẫn do AI tạo ra trực tiếp trên phần mềm đang sử dụng.
 
 ## Tính năng chính
 *   **Lớp phủ toàn cầu (Global Overlay):** Hoạt động trên mọi ứng dụng (Maya, Blender, Adobe Affter Effects, v.v.).
