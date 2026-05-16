@@ -13,6 +13,7 @@ import sys
 import os
 import json
 import re
+import signal
 import webbrowser
 import time
 from PIL import Image, ImageTk, ImageDraw
@@ -144,16 +145,28 @@ def execute_analysis(user_prompt, image_obj, snip_coords, screen_size, previous_
             "X-Project-Secret": "SUPaSecureD_Key123!#"
         }
 
-        app_queue.put({"log": t("log_analyze")})
-        response = requests.post(proxy_url, json=payload, headers=headers, timeout=90)
-        
-        try:
-            data = response.json()
-        except Exception:
-            raise ValueError("Invalid server response. Check proxy URL.")
-            
-        if response.status_code != 200 or "error" in data:
-            raise ValueError(data.get("error", "Unknown server error."))
+        last_error = None
+        for attempt in range(1, 4):
+            try:
+                app_queue.put({"log": t("log_analyze")})
+                response = requests.post(proxy_url, json=payload, headers=headers, timeout=90)
+
+                try:
+                    data = response.json()
+                except Exception:
+                    raise ValueError("Invalid server response. Check proxy URL.")
+
+                if response.status_code != 200 or "error" in data:
+                    raise ValueError(data.get("error", "Unknown server error."))
+
+                break
+            except Exception as e:
+                last_error = e
+                if attempt < 3:
+                    app_queue.put({"log": f"Retrying... ({attempt}/3)"})
+                    time.sleep(0.6)
+                else:
+                    raise last_error
             
         unique_steps =[]
         seen_titles = set()
@@ -200,7 +213,7 @@ def execute_analysis(user_prompt, image_obj, snip_coords, screen_size, previous_
         app_queue.put({"data": data})
         
     except Exception as e:
-        app_queue.put({"error": str(e)})
+        app_queue.put({"error": str(e), "reset_prompt": True})
 
 def check_queue():
     try:
@@ -212,6 +225,8 @@ def check_queue():
                 update_terminal_log(msg["log"])
             elif "error" in msg:
                 update_terminal_log(f"ERROR: {msg['error']}", is_error=True)
+                if msg.get("reset_prompt"):
+                    root.after(0, reset_to_prompt)
     except queue.Empty:
         pass
     root.after(100, check_queue)
@@ -685,16 +700,47 @@ def show_disclosure_window(prompt_text, snip_coords, original_img):
     global disclosure_win
     disclosure_win = tk.Toplevel(root)
     disclosure_win.title("Consent")
-    disclosure_win.geometry("450x580")
+    screen_w = root.winfo_screenwidth()
+    screen_h = root.winfo_screenheight()
+    win_w = max(420, min(640, int(screen_w * 0.42)))
+    win_h = max(500, min(760, int(screen_h * 0.82)))
+    x = max(0, (screen_w - win_w) // 2)
+    y = max(0, (screen_h - win_h) // 2)
+    disclosure_win.geometry(f"{win_w}x{win_h}+{x}+{y}")
+    disclosure_win.minsize(420, 500)
     disclosure_win.configure(bg="#111827")
     disclosure_win.attributes('-topmost', True)
     disclosure_win.overrideredirect(True)
-    
-    x = (root.winfo_screenwidth() // 2) - 225
-    y = (root.winfo_screenheight() // 2) - 290 
-    disclosure_win.geometry(f"+{x}+{y}")
-    
-    tk.Label(disclosure_win, text=t("disc_title"), bg="#111827", fg="#00ffcc", font=("Arial", 14, "bold")).pack(pady=(20, 10))
+
+    main_frame = tk.Frame(disclosure_win, bg="#111827")
+    main_frame.pack(fill=tk.BOTH, expand=True)
+    main_frame.grid_rowconfigure(1, weight=1)
+    main_frame.grid_columnconfigure(0, weight=1)
+
+    tk.Label(main_frame, text=t("disc_title"), bg="#111827", fg="#00ffcc", font=("Arial", 14, "bold")).grid(row=0, column=0, pady=(20, 10), padx=20)
+
+    body_frame = tk.Frame(main_frame, bg="#111827")
+    body_frame.grid(row=1, column=0, sticky="nsew", padx=20)
+    body_frame.grid_rowconfigure(0, weight=1)
+    body_frame.grid_columnconfigure(0, weight=1)
+
+    body_canvas = tk.Canvas(body_frame, bg="#111827", highlightthickness=0)
+    body_scrollbar = ttk.Scrollbar(body_frame, orient="vertical", command=body_canvas.yview)
+    body_content = tk.Frame(body_canvas, bg="#111827")
+
+    body_content.bind(
+        "<Configure>",
+        lambda e: body_canvas.configure(scrollregion=body_canvas.bbox("all"))
+    )
+    content_window = body_canvas.create_window((0, 0), window=body_content, anchor="n")
+    body_canvas.bind(
+        "<Configure>",
+        lambda e: body_canvas.itemconfig(content_window, width=e.width)
+    )
+    body_canvas.configure(yscrollcommand=body_scrollbar.set)
+
+    body_canvas.grid(row=0, column=0, sticky="nsew")
+    body_scrollbar.grid(row=0, column=1, sticky="ns")
     
     full_img_to_send = original_img.copy()
     if snip_coords:
@@ -702,17 +748,19 @@ def show_disclosure_window(prompt_text, snip_coords, original_img):
         draw.rectangle(snip_coords, outline="red", width=6)
         
     thumb_img = full_img_to_send.copy()
-    thumb_img.thumbnail((350, 200), Image.Resampling.LANCZOS)
+    thumb_img.thumbnail((max(280, win_w - 100), max(180, int(win_h * 0.28))), Image.Resampling.LANCZOS)
     tk_thumb = ImageTk.PhotoImage(thumb_img)
     
-    img_lbl = tk.Label(disclosure_win, image=tk_thumb, bg="#1F2937", bd=2, relief=tk.SOLID)
+    img_lbl = tk.Label(body_content, image=tk_thumb, bg="#1F2937", bd=2, relief=tk.SOLID)
     img_lbl.image = tk_thumb
-    img_lbl.pack(pady=10)
+    img_lbl.pack(pady=(10, 12))
     
-    tk.Label(disclosure_win, text=t("disc_msg"), bg="#111827", fg="#D1D5DB", font=("Arial", 10), wraplength=380, justify=tk.LEFT).pack(padx=20, pady=(15, 25))
-    
-    btn_frame = tk.Frame(disclosure_win, bg="#111827")
-    btn_frame.pack(fill=tk.X, padx=20, pady=(0, 20))
+    tk.Label(body_content, text=t("disc_msg"), bg="#111827", fg="#D1D5DB", font=("Arial", 10), wraplength=max(260, win_w - 80), justify=tk.LEFT).pack(pady=(6, 18), anchor="w")
+
+    btn_frame = tk.Frame(main_frame, bg="#111827")
+    btn_frame.grid(row=2, column=0, sticky="ew", padx=20, pady=(0, 20))
+    btn_frame.grid_columnconfigure(0, weight=1)
+    btn_frame.grid_columnconfigure(1, weight=1)
     
     def on_accept():
         disclosure_win.destroy()
@@ -724,8 +772,8 @@ def show_disclosure_window(prompt_text, snip_coords, original_img):
         disclosure_win.destroy()
         show_prompt_window()
         
-    tk.Button(btn_frame, text=t("go_back"), bg="#374151", fg="white", font=("Arial", 10, "bold"), relief=tk.FLAT, bd=0, command=on_back, cursor="hand2", padx=10, pady=8).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0, 5))
-    tk.Button(btn_frame, text=t("accept"), bg="#00ffcc", fg="black", font=("Arial", 10, "bold"), relief=tk.FLAT, bd=0, command=on_accept, cursor="hand2", padx=10, pady=8).pack(side=tk.RIGHT, expand=True, fill=tk.X, padx=(5, 0))
+    tk.Button(btn_frame, text=t("go_back"), bg="#374151", fg="white", font=("Arial", 10, "bold"), relief=tk.FLAT, bd=0, command=on_back, cursor="hand2", padx=10, pady=8).grid(row=0, column=0, sticky="ew", padx=(0, 5))
+    tk.Button(btn_frame, text=t("accept"), bg="#00ffcc", fg="black", font=("Arial", 10, "bold"), relief=tk.FLAT, bd=0, command=on_accept, cursor="hand2", padx=10, pady=8).grid(row=0, column=1, sticky="ew", padx=(5, 0))
 
 
 # ==========================================
@@ -1085,12 +1133,33 @@ def on_hotkey():
     last_user_prompt = ""
     root.after(0, show_prompt_window)
 
+
+def on_hotkey_event(event=None):
+    on_hotkey()
+    return "break"
+
+
+def register_hotkey():
+    try:
+        keyboard.add_hotkey("ctrl+shift+q", on_hotkey)
+        return True
+    except Exception as exc:
+        print(f"[!] Global hotkey unavailable: {exc}")
+        root.bind_all("<Control-Shift-KeyPress-q>", on_hotkey_event)
+        root.bind_all("<Control-Shift-KeyPress-Q>", on_hotkey_event)
+        return False
+
 # Init
 root.withdraw()
 print("[*] Blueprint Lens Bridge active.")
 print("[*] Listening for Ctrl+Shift+Q ...")
 
-keyboard.add_hotkey('ctrl+shift+q', on_hotkey)
+if sys.platform == "win32":
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+    if hasattr(signal, "SIGBREAK"):
+        signal.signal(signal.SIGBREAK, signal.SIG_IGN)
+
+register_hotkey()
 
 root.after(100, check_queue)
 root.mainloop()
