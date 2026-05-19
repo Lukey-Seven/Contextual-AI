@@ -1,94 +1,97 @@
-@@ -7,7 +7,7 @@ Important things to know before you start:
-- This app is built for Windows.
-- You need internet access because the app sends your screenshot to a remote AI service for analysis.
-- The app saves your previous guides in a local file called `saved_history.json`.
-- You do not need VS Code to run the app, but it can help if you want to edit the code later.
-- VS Code is the recommended way to open the project, run the app, and edit the code later.
+# Blueprint Lens
 
-## What the app does
+Blueprint Lens is a Windows desktop app that captures screenshots and turns them into step-by-step AI guidance. When the app launches, the main prompt opens automatically so you can start immediately.
 
-@@ -26,14 +26,71 @@ Before installing the app, make sure you have:
+## What it does
+
+- Opens a prompt window on launch
+- Analyzes a full-screen screenshot from your typed prompt
+- Lets you choose a specific area before analysis
+- Supports quick screenshot-based follow-up with `Ctrl+Shift+Q`
+- Saves guide history locally in `saved_history.json`
+- Lets you view, import, export, and continue guides
+
+## Requirements
+
+- Windows
+- Python 3.x
 - Internet access
-- Permission to run apps that read your keyboard and take screenshots
+- Permission to capture screenshots and listen for global hotkeys
 
-If you do not have Python yet, install it from the official website:
-## Recommended setup with VS Code
+## Install
 
-If you are new to coding, use VS Code for the easiest setup.
+If you want the simplest setup, use VS Code. You do not need VS Code to run the app, but it makes setup easier.
 
-### 1) Install VS Code
+### Using VS Code
 
-1. Go to https://code.visualstudio.com/
-2. Download and install Visual Studio Code for Windows
-3. During installation, accept the default options
-
-### 2) Open the project folder in VS Code
-
-1. Start VS Code
-2. Click Open Folder
-3. Choose the folder that contains `contextual_ai_app.py`
-
-### 3) Install Python if needed
-
-If Python is not already installed, install it from the official website:
-
-1. Go to https://www.python.org/downloads/
-2. Download the latest Python 3 installer for Windows
-3. During setup, check the box that says Add Python to PATH
-4. Finish the installation
-
-## Install the app from scratch
-### 4) Open the VS Code terminal
-
-In VS Code, open the terminal with Terminal > New Terminal.
-
-### 5) Create a virtual environment
-
-This keeps the app’s packages separate from the rest of your computer.
+1. Install VS Code from https://code.visualstudio.com/
+2. Open the folder that contains `contextual_ai_app.py`
+3. Open the terminal in VS Code
+4. Create a virtual environment:
 
 ```powershell
 python -m venv .venv
 ```
 
-### 6) Turn on the virtual environment
+5. Activate it:
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
 ```
 
-If Windows says script running is disabled, run this once in the same VS Code terminal and then try again:
+If Windows blocks script execution, run this once in the same terminal:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
 ```
 
-### 7) Install the required Python packages
+6. Install the required packages:
 
 ```powershell
 python -m pip install --upgrade pip
 pip install keyboard pyautogui requests pillow
 ```
 
-### 8) Run the app
+### Without VS Code
+
+Open a terminal in the project folder and run the same commands above.
+
+## Run
+
+Start the app with:
 
 ```powershell
 python contextual_ai_app.py
 ```
 
-When the app is running, you should see a message saying it is listening for `Ctrl+Shift+Q`.
+The prompt window should appear immediately after launch.
 
-## Optional setup without VS Code
+## How to use
 
-Follow these steps in the folder that contains `contextual_ai_app.py`.
+1. Type a question into the main prompt.
+2. Use `Send` to analyze the current screenshot.
+3. Use `Locate` if you want the app to analyze the full screenshot after the consent step.
+4. Use `Snip` if you want to highlight a specific region first.
+5. Use `View History` to reopen saved guides.
+6. Use `Import Guide` to load a previously exported `.cguide` or `.json` file.
+7. Use `Quick Inspect` to click a point on the screen and analyze the nearby UI.
 
-@@ -68,9 +125,7 @@ python -m pip install --upgrade pip
-pip install keyboard pyautogui requests pillow
-```
+## Hotkey behavior
 
-## Run the app
+- `Ctrl+Shift+Q` is now a quick screenshot shortcut.
+- It closes the visible UI first so the capture is clean.
+- It then opens the continuation prompt with the screenshot preview.
+- In that window, `Go Back` returns you to the app and `Accept` continues with analysis.
 
-After the packages finish installing, start the program with:
-### 5) Run the app
+## Files
 
-```powershell
-python contextual_ai_app.py
+- `contextual_ai_app.py` is the main app.
+- `saved_history.json` stores your local guide history.
+- `output/` is used for generated output.
+- `backup/` contains older copies of the app.
+
+## Notes
+
+- The app relies on a remote AI service for analysis, so internet access is required.
+- Closing the app window exits the program.
+- If you start it from a terminal and close the terminal, the app process ends with it.
