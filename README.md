@@ -1,41 +1,94 @@
-# Contextual AI Guide 🎨🤖
+@@ -7,7 +7,7 @@ Important things to know before you start:
+- This app is built for Windows.
+- You need internet access because the app sends your screenshot to a remote AI service for analysis.
+- The app saves your previous guides in a local file called `saved_history.json`.
+- You do not need VS Code to run the app, but it can help if you want to edit the code later.
+- VS Code is the recommended way to open the project, run the app, and edit the code later.
 
-Contextual AI is an intelligent visual assistant designed for visual learners who find complex software interfaces overwhelming[cite: 1, 5]. Instead of reading long manuals, you can get an AI-powered overlay directly on top of any software you are using[cite: 5].
+## What the app does
 
-## Features
-*   **Global Overlay:** Works on top of any application (VS Code, Blender, Adobe Suite, etc.)[cite: 5].
-*   **Instant Capture:** Use the **Ctrl+Shift+Q** shortcut to quickly capture a clean screenshot and continue the guide from the screenshot preview[cite: 5].
-*   **Smart Guidance:** Uses **Gemini 3 Flash** to generate step-by-step visual instructions based on your screenshot[cite: 2, 5].
-*   **Integrated Search:** Provides direct links to YouTube and Web documentation for every identified step[cite: 3, 5].
+@@ -26,14 +26,71 @@ Before installing the app, make sure you have:
+- Internet access
+- Permission to run apps that read your keyboard and take screenshots
 
-## How to Run
-1.  Ensure you have **Python 3.x** installed[cite: 5].
-2.  Install required libraries:
-    `pip install pyautogui requests keyboard pillow`[cite: 5].
-3.  Run the application:
-    `python contextual_ai_app.py`[cite: 5].
-4.  The main prompt opens automatically when the app launches. Open any software you want to learn, then press **Ctrl+Shift+Q** only when you want a quick screenshot for the continuation prompt[cite: 5].
+If you do not have Python yet, install it from the official website:
+## Recommended setup with VS Code
 
----
+If you are new to coding, use VS Code for the easiest setup.
 
-# Contextual AI Guide (Tiếng Việt) 🎨🤖
+### 1) Install VS Code
 
-Contextual AI là trợ lý thị giác thông minh được thiết kế cho những người học qua hình ảnh (visual learners), giúp đơn giản hóa các giao diện phần mềm phức tạp[cite: 1, 5]. Thay vì đọc các tài liệu dài dòng, bạn sẽ nhận được một lớp hướng dẫn do AI tạo ra trực tiếp trên phần mềm đang sử dụng[cite: 5].
+1. Go to https://code.visualstudio.com/
+2. Download and install Visual Studio Code for Windows
+3. During installation, accept the default options
 
-## Tính năng chính
-*   **Lớp phủ toàn cầu (Global Overlay):** Hoạt động trên mọi ứng dụng (VS Code, Blender, Adobe Suite, v.v.)[cite: 5].
-*   **Chụp nhanh tức thì:** Sử dụng tổ hợp phím **Ctrl+Shift+Q** để chụp nhanh một ảnh sạch và mở phần tiếp tục hướng dẫn từ bản xem trước ảnh[cite: 5].
-*   **Chỉ dẫn thông minh:** Sử dụng **Gemini 3 Flash** để tạo hướng dẫn trực quan từng bước dựa trên ảnh chụp màn hình của bạn[cite: 2, 5].
-*   **Tìm kiếm tích hợp:** Cung cấp link trực tiếp đến YouTube và tài liệu Web cho từng bước hướng dẫn[cite: 3, 5].
+### 2) Open the project folder in VS Code
 
-## Cách cài đặt và sử dụng
-1.  Đảm bảo máy bạn đã cài đặt **Python 3.x**[cite: 5].
-2.  Cài đặt các thư viện cần thiết:
-    `pip install pyautogui requests keyboard pillow`[cite: 5].
-3.  Chạy ứng dụng:
-    `python contextual_ai_app.py`[cite: 5].
-4.  Màn hình nhập chính sẽ tự mở khi ứng dụng khởi chạy. Mở bất kỳ phần mềm nào bạn muốn học, sau đó chỉ nhấn **Ctrl+Shift+Q** khi muốn chụp nhanh ảnh để tiếp tục hướng dẫn[cite: 5].
+1. Start VS Code
+2. Click Open Folder
+3. Choose the folder that contains `contextual_ai_app.py`
 
----
+### 3) Install Python if needed
 
-**Note:** The API quota is shared and provided by the me, so you don't need your own keys for now.
+If Python is not already installed, install it from the official website:
+
+1. Go to https://www.python.org/downloads/
+2. Download the latest Python 3 installer for Windows
+3. During setup, check the box that says Add Python to PATH
+4. Finish the installation
+
+## Install the app from scratch
+### 4) Open the VS Code terminal
+
+In VS Code, open the terminal with Terminal > New Terminal.
+
+### 5) Create a virtual environment
+
+This keeps the app’s packages separate from the rest of your computer.
+
+```powershell
+python -m venv .venv
+```
+
+### 6) Turn on the virtual environment
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
+If Windows says script running is disabled, run this once in the same VS Code terminal and then try again:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
+```
+
+### 7) Install the required Python packages
+
+```powershell
+python -m pip install --upgrade pip
+pip install keyboard pyautogui requests pillow
+```
+
+### 8) Run the app
+
+```powershell
+python contextual_ai_app.py
+```
+
+When the app is running, you should see a message saying it is listening for `Ctrl+Shift+Q`.
+
+## Optional setup without VS Code
+
+Follow these steps in the folder that contains `contextual_ai_app.py`.
+
+@@ -68,9 +125,7 @@ python -m pip install --upgrade pip
+pip install keyboard pyautogui requests pillow
+```
+
+## Run the app
+
+After the packages finish installing, start the program with:
+### 5) Run the app
+
+```powershell
+python contextual_ai_app.py
