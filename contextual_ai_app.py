@@ -30,19 +30,26 @@ snip_win = None
 drawn_rectangles = []
 step_cards =[]
 animation_active = False
+app_is_shutting_down = False
 
 initial_screenshot = None
 current_session_history_idx = -1
 last_user_prompt = ""
+current_secret_code = ""
+debug_limit_enabled = False
+skip_preview_enabled = False
 
 # --- LOCALIZATION DICTIONARY ---
 LANG_DICT = {
     "EN": {
         "title": "Blueprint Lens",
-        "instruction": "Enter your question below or select a specific area to get an AI-guided step-by-step overlay.",
+        "instruction": "Type a question, then press Enter or Send to analyze instantly. Use Snip for a specific area, and expand Extra settings only when you need them.",
+        "quick_send_tip": "Tip: Press Enter to send instantly. If Skip preview is off, Enter opens a confirmation screen and you must press Enter again to confirm.",
+        "screenshot_tip": "Tip: Ctrl+Shift+Q lets you take a screenshot anytime while the app is still running.",
         "placeholder": "Enter your question for the AI here!",
         "locate": "Locate",
         "snip": "Ask a specific area",
+        "send": "Send",
         "cancel": "Cancel",
         "done": "Done",
         "search": "Search Web",
@@ -58,13 +65,22 @@ LANG_DICT = {
         "log_analyze": "Analyzing spatial UI coordinates...",
         "log_generate": "Generating step-by-step guide...",
         "log_done": "Complete! Rendering overlay...",
+        "history_search": "Search local history",
+        "history_search_hint": "Matches keyword searches against previous prompts.",
+        "extra_settings": "Extra settings",
+        "skip_preview": "Skip preview before sending (not recommended)",
+        "skip_preview_help": "When enabled, Enter sends immediately without the confirmation screen.",
+        "secret_dev": "Secret Code for Developer",
     },
     "VI": {
         "title": "Blueprint Lens",
-        "instruction": "Nhập câu hỏi của bạn bên dưới hoặc chọn một khu vực cụ thể để nhận hướng dẫn chi tiết từ AI.",
+        "instruction": "Nhập câu hỏi của bạn, sau đó nhấn Enter hoặc Gửi để phân tích ngay. Dùng Chọn khu vực cho một vùng cụ thể và chỉ mở Cài đặt bổ sung khi cần.",
+        "quick_send_tip": "Mẹo: Nhấn Enter để gửi ngay. Nếu tắt bỏ qua xem trước, Enter sẽ mở màn hình xác nhận và bạn phải nhấn Enter thêm lần nữa để xác nhận.",
+        "screenshot_tip": "Mẹo: Ctrl+Shift+Q cho phép chụp ảnh màn hình bất cứ lúc nào miễn là ứng dụng vẫn đang chạy.",
         "placeholder": "Hãy nhập câu hỏi cho AI tại đây!",
         "locate": "Tìm kiếm",
         "snip": "Chọn khu vực",
+        "send": "Gửi",
         "cancel": "Hủy",
         "done": "Hoàn tất",
         "search": "Tìm trên Web",
@@ -72,7 +88,7 @@ LANG_DICT = {
         "ai_guide": "Hướng dẫn AI",
         "thinking": "AI đang suy nghĩ",
         "disc_title": "Quyền riêng tư & Dữ liệu",
-        "disc_msg": "Thông báo nhỏ từ người phát triển!\n\n Đây là dự án của sinh viên. Để phân tích yêu cầu, ảnh chụp màn hình sẽ được gửi đến Google Gemini. Nếu hạn mức trả phí hết, hệ thống có thể chuyển sang OpenAI.\n\n Bằng cách tiếp tục, bạn đang giúp AI học cách nhận diện giao diện tốt hơn trong tương lai.",
+        "disc_msg": "Thông báo nhỏ từ nhà phát triển!\n\nĐây là dự án của sinh viên. Để phân tích yêu cầu, ảnh chụp màn hình sẽ được gửi đến Google Gemini. Nếu hạn mức trả phí hết, hệ thống có thể chuyển sang OpenAI.\n\nBằng cách tiếp tục, bạn đang giúp AI học cách nhận diện giao diện tốt hơn trong tương lai.",
         "accept": "Chấp nhận & Phân tích",
         "go_back": "Quay lại",
         "log_start": "Đang khởi tạo Động cơ Thị giác AI...",
@@ -80,6 +96,12 @@ LANG_DICT = {
         "log_analyze": "Đang phân tích tọa độ không gian UI...",
         "log_generate": "Đang tạo hướng dẫn từng bước...",
         "log_done": "Hoàn thành! Đang hiển thị lớp phủ...",
+        "history_search": "Tìm trong lịch sử cục bộ",
+        "history_search_hint": "Khớp tìm kiếm theo từ khóa với các câu hỏi trước đó.",
+        "extra_settings": "Cài đặt bổ sung",
+        "skip_preview": "Bỏ qua xem trước trước khi gửi (không khuyến nghị)",
+        "skip_preview_help": "Khi bật, Enter sẽ gửi ngay mà không mở màn hình xác nhận.",
+        "secret_dev": "Mã bí mật cho nhà phát triển",
     }
 }
 
@@ -116,7 +138,7 @@ def load_and_display_image(url, label):
 # AI PROCESSING CORE
 # ==========================================
 def execute_analysis(user_prompt, image_obj, snip_coords, screen_size, previous_context=None, is_continuation=False):
-    global current_session_history_idx, last_user_prompt
+    global current_session_history_idx, last_user_prompt, current_secret_code, debug_limit_enabled
     try:
         app_queue.put({"log": t("log_upload")})
         
@@ -138,7 +160,9 @@ def execute_analysis(user_prompt, image_obj, snip_coords, screen_size, previous_
             "hasHighlight": bool(snip_coords),
             "language": current_lang,
             "detailLevel": "detailed",
-            "modelBackend": "smart"  
+            "modelBackend": "smart",
+            "secret_key": current_secret_code.strip(),
+            "debug_limit": debug_limit_enabled
         }
         
         headers = {
@@ -155,6 +179,9 @@ def execute_analysis(user_prompt, image_obj, snip_coords, screen_size, previous_
                     data = response.json()
                 except Exception:
                     raise ValueError("Invalid server response. Check proxy URL.")
+
+                if response.status_code == 429 or data.get("error") == "OUT_OF_CREDITS":
+                    raise ValueError(data.get("message", "You have reached the request limit. Please wait or buy more credits."))
 
                 if response.status_code != 200 or "error" in data:
                     raise ValueError(data.get("error", "Unknown server error."))
@@ -251,6 +278,69 @@ else:
 canvas = tk.Canvas(root, bg=bg_color, highlightthickness=0)
 canvas.pack(fill='both', expand=True)
 
+def close_windows_for_capture():
+    global prompt_win, side_panel, loading_panel, disclosure_win, snip_win
+
+    for window_name in ("prompt_win", "side_panel", "loading_panel", "disclosure_win", "snip_win"):
+        window = globals().get(window_name)
+        if window and window.winfo_exists():
+            try:
+                window.destroy()
+            except Exception:
+                pass
+        globals()[window_name] = None
+
+    canvas.delete("all")
+    root.withdraw()
+
+
+def shutdown_app(*_args):
+    global app_is_shutting_down, animation_active
+    global prompt_win, side_panel, loading_panel, disclosure_win, snip_win
+
+    if app_is_shutting_down:
+        return
+
+    app_is_shutting_down = True
+    animation_active = False
+
+    for window_name in ("prompt_win", "side_panel", "loading_panel", "disclosure_win", "snip_win"):
+        window = globals().get(window_name)
+        if window and window.winfo_exists():
+            try:
+                window.destroy()
+            except Exception:
+                pass
+        globals()[window_name] = None
+
+    try:
+        keyboard.unhook_all_hotkeys()
+    except Exception:
+        pass
+
+    try:
+        root.quit()
+    except Exception:
+        pass
+
+    try:
+        root.destroy()
+    except Exception:
+        pass
+
+
+def begin_quick_prompt_flow():
+    global initial_screenshot, current_session_history_idx, last_user_prompt
+
+    close_windows_for_capture()
+    root.update_idletasks()
+    root.update()
+    time.sleep(0.2)
+    initial_screenshot = pyautogui.screenshot()
+    current_session_history_idx = -1
+    last_user_prompt = ""
+    show_continue_window(preview_image=initial_screenshot)
+
 def reset_to_prompt():
     global side_panel, loading_panel, disclosure_win, initial_screenshot
     global current_session_history_idx, last_user_prompt
@@ -275,18 +365,22 @@ def reset_to_prompt():
 def show_history_window():
     hist_win = tk.Toplevel(root)
     hist_win.title("Local History")
-    hist_win.geometry("500x500")
+    screen_w = root.winfo_screenwidth()
+    screen_h = root.winfo_screenheight()
+    win_w = max(520, min(780, screen_w - 80))
+    win_h = max(540, min(760, screen_h - 80))
+    hist_win.geometry(f"{win_w}x{win_h}")
     hist_win.configure(bg="#111827")
     hist_win.attributes('-topmost', True)
-    hist_win.overrideredirect(True)
-    
-    x = (root.winfo_screenwidth() // 2) - 250
-    y = (root.winfo_screenheight() // 2) - 250
+    hist_win.resizable(True, True)
+
+    x = max(0, (screen_w - win_w) // 2)
+    y = max(0, (screen_h - win_h) // 2)
     hist_win.geometry(f"+{x}+{y}")
-    
+
     header = tk.Frame(hist_win, bg="#111827", cursor="fleur")
     header.pack(fill=tk.X, padx=20, pady=(15, 10))
-    
+
     def start_move(e): hist_win.x, hist_win.y = e.x, e.y
     def stop_move(e): hist_win.x = hist_win.y = None
     def do_move(e): hist_win.geometry(f"+{hist_win.winfo_x() + (e.x - hist_win.x)}+{hist_win.winfo_y() + (e.y - hist_win.y)}")
@@ -294,30 +388,52 @@ def show_history_window():
     header.bind("<ButtonPress-1>", start_move)
     header.bind("<ButtonRelease-1>", stop_move)
     header.bind("<B1-Motion>", do_move)
-    
+
     tk.Label(header, text="Local History", bg="#111827", fg="#00ffcc", font=("Arial", 14, "bold")).pack(side=tk.LEFT)
-    
+
     def close_history():
         hist_win.destroy()
         show_prompt_window()
-        
+
     tk.Button(header, text="Close", bg="#EF4444", fg="white", font=("Arial", 9, "bold"), relief=tk.FLAT, command=close_history, cursor="hand2").pack(side=tk.RIGHT)
-    
+
+    search_block = tk.Frame(hist_win, bg="#111827")
+    search_block.pack(fill=tk.X, padx=20, pady=(0, 8))
+    tk.Label(search_block, text=t("history_search"), bg="#111827", fg="#9CA3AF", font=("Arial", 9, "bold")).pack(anchor="w")
+    search_var = tk.StringVar()
+    search_entry = tk.Entry(search_block, textvariable=search_var, bg="#1F2937", fg="white", insertbackground="white", relief=tk.FLAT, font=("Arial", 11))
+    search_entry.pack(fill=tk.X, pady=(4, 4), ipady=7)
+    tk.Label(search_block, text=t("history_search_hint"), bg="#111827", fg="#6B7280", font=("Arial", 8)).pack(anchor="w")
+
     list_frame = tk.Frame(hist_win, bg="#111827")
     list_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 20))
-    
+
     hist_canvas = tk.Canvas(list_frame, bg="#111827", highlightthickness=0)
     scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=hist_canvas.yview)
     scrollable_frame = tk.Frame(hist_canvas, bg="#111827")
-    
+
     scrollable_frame.bind("<Configure>", lambda e: hist_canvas.configure(scrollregion=hist_canvas.bbox("all")))
     canvas_window = hist_canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
     hist_canvas.bind("<Configure>", lambda e: hist_canvas.itemconfig(canvas_window, width=e.width))
     hist_canvas.configure(yscrollcommand=scrollbar.set)
-    
+
     hist_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
     scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-    
+
+    def _on_mousewheel(event):
+        hist_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+    hist_canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
+    history_file = "saved_history.json"
+    history_data =[]
+    if os.path.exists(history_file):
+        try:
+            with open(history_file, 'r', encoding='utf-8') as f:
+                history_data = json.load(f)
+        except Exception:
+            history_data =[]
+
     def load_item(idx, item_data, img_b64, p_text):
         global initial_screenshot, current_session_history_idx, last_user_prompt
         current_session_history_idx = idx
@@ -330,88 +446,102 @@ def show_history_window():
                 print("Error loading image from history:", e)
         hist_win.destroy()
         draw_overlay(item_data)
-        
+
     def delete_item(idx):
         if messagebox.askyesno("Delete", "Are you sure you want to delete this guide and all its sub-steps?"):
             try:
-                if os.path.exists("saved_history.json"):
-                    with open("saved_history.json", 'r', encoding='utf-8') as f:
-                        history_data = json.load(f)
-                    
-                    if 0 <= idx < len(history_data):
-                        del history_data[idx]
-                        
-                        with open("saved_history.json", 'w', encoding='utf-8') as f:
-                            json.dump(history_data, f, ensure_ascii=False, indent=2)
-                        
-                        hist_win.destroy()
-                        show_history_window()
+                if 0 <= idx < len(history_data):
+                    del history_data[idx]
+                    with open(history_file, 'w', encoding='utf-8') as f:
+                        json.dump(history_data, f, ensure_ascii=False, indent=2)
+                    render_history()
             except Exception as e:
                 print(f"Error deleting history: {e}")
 
     def make_toggle(frm, has_subs):
         def toggle():
-            if not has_subs: return
+            if not has_subs:
+                return
             if frm.winfo_ismapped():
                 frm.pack_forget()
             else:
                 frm.pack(fill=tk.X, pady=(0, 5))
         return toggle
 
-    try:
-        if os.path.exists("saved_history.json"):
-            with open("saved_history.json", 'r', encoding='utf-8') as f:
-                history_data = json.load(f)
-                
-            for i, item in reversed(list(enumerate(history_data))):
-                session_frame = tk.Frame(scrollable_frame, bg="#111827")
-                session_frame.pack(fill=tk.X, pady=5)
-                
-                main_row = tk.Frame(session_frame, bg="#374151")
-                main_row.pack(fill=tk.X)
-                
-                sub_steps = item.get("sub_steps",[])
-                has_subs = len(sub_steps) > 0
-                prefix = "▼ " if has_subs else "📄 "
-                prompt_text = item.get("prompt", "Unknown query")
-                
-                sub_frame = tk.Frame(session_frame, bg="#111827")
-                
-                toggle_btn = tk.Button(main_row, text=prefix + prompt_text, bg="#374151", fg="white", font=("Arial", 11), relief=tk.FLAT, cursor="hand2", anchor="w", command=make_toggle(sub_frame, has_subs))
-                toggle_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=10, pady=8)
-                
-                delete_btn = tk.Button(main_row, text="✖", bg="#EF4444", fg="white", font=("Arial", 9, "bold"), relief=tk.FLAT, cursor="hand2", command=lambda idx=i: delete_item(idx))
-                delete_btn.pack(side=tk.RIGHT, padx=(0, 10), pady=8)
-                
-                load_btn = tk.Button(main_row, text="Load", bg="#10B981", fg="white", font=("Arial", 9, "bold"), relief=tk.FLAT, cursor="hand2", command=lambda idx=i, d=item.get("data"), img=item.get("image"), pt=prompt_text: load_item(idx, d, img, pt))
-                load_btn.pack(side=tk.RIGHT, padx=(10, 5), pady=8)
-                
-                # Render sub-steps (hidden by default)
-                for sub_i, sub in enumerate(sub_steps):
-                    sub_row = tk.Frame(sub_frame, bg="#1F2937")
-                    sub_row.pack(fill=tk.X, padx=(30, 0), pady=(0, 2))
-                    
-                    sub_prompt = sub.get("prompt", "Unknown sub-query")
-                    tk.Label(sub_row, text="↳ " + sub_prompt, bg="#1F2937", fg="#D1D5DB", font=("Arial", 10), anchor="w").pack(side=tk.LEFT, fill=tk.X, expand=True, padx=10, pady=6)
-                    
-                    sub_load = tk.Button(sub_row, text="Load", bg="#3B82F6", fg="white", font=("Arial", 9, "bold"), relief=tk.FLAT, cursor="hand2", command=lambda idx=i, d=sub.get("data"), img=sub.get("image"), pt=sub_prompt: load_item(idx, d, img, pt))
-                    sub_load.pack(side=tk.RIGHT, padx=10, pady=6)
-        else:
-            tk.Label(scrollable_frame, text="No history found.", bg="#111827", fg="#D1D5DB", font=("Arial", 11)).pack(pady=20)
-    except Exception as e:
-        tk.Label(scrollable_frame, text=f"Error loading history: {e}", bg="#111827", fg="#EF4444", font=("Arial", 11)).pack(pady=20)
+    def matches_query(item, query_terms):
+        if not query_terms:
+            return True
+        parts = [str(item.get('prompt', ''))]
+        data_blob = item.get('data', {})
+        parts.append(json.dumps(data_blob, ensure_ascii=False))
+        for sub in item.get('sub_steps', []):
+            if isinstance(sub, dict):
+                parts.append(str(sub.get('prompt', '')))
+                parts.append(json.dumps(sub.get('data', {}), ensure_ascii=False))
+        haystack = " ".join(parts).lower()
+        return all(term in haystack for term in query_terms)
 
-    # Enable mouse wheel
-    def _on_mousewheel(event):
-        hist_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
-    hist_canvas.bind_all("<MouseWheel>", _on_mousewheel)
+    def clear_cards():
+        for child in scrollable_frame.winfo_children():
+            child.destroy()
+
+    def render_history(*_args):
+        clear_cards()
+        query = search_var.get().strip().lower()
+        terms = [term for term in re.split(r"\s+", query) if term]
+        rows = []
+
+        wrap_width = max(360, hist_win.winfo_width() - 170)
+
+        if history_data:
+            for i, item in reversed(list(enumerate(history_data))):
+                if matches_query(item, terms):
+                    rows.append((i, item))
+
+        if not rows:
+            empty_text = "No local history found." if not query else "No matching history found."
+            tk.Label(scrollable_frame, text=empty_text, bg="#111827", fg="#9CA3AF", font=("Arial", 11), wraplength=wrap_width, justify=tk.LEFT).pack(pady=20)
+            return
+
+        for i, item in rows:
+            session_frame = tk.Frame(scrollable_frame, bg="#111827")
+            session_frame.pack(fill=tk.X, pady=5)
+
+            main_row = tk.Frame(session_frame, bg="#374151")
+            main_row.pack(fill=tk.X)
+
+            sub_steps = item.get("sub_steps", [])
+            has_subs = len(sub_steps) > 0
+            prefix = "▼ " if has_subs else "📄 "
+            prompt_text = item.get("prompt", "Unknown query")
+
+            sub_frame = tk.Frame(session_frame, bg="#111827")
+
+            toggle_btn = tk.Button(main_row, text=prefix + prompt_text, bg="#374151", fg="white", font=("Arial", 11), relief=tk.FLAT, cursor="hand2", anchor="w", command=make_toggle(sub_frame, has_subs))
+            toggle_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=10, pady=8)
+
+            delete_btn = tk.Button(main_row, text="✖", bg="#EF4444", fg="white", font=("Arial", 9, "bold"), relief=tk.FLAT, cursor="hand2", command=lambda idx=i: delete_item(idx))
+            delete_btn.pack(side=tk.RIGHT, padx=(0, 10), pady=8)
+
+            load_btn = tk.Button(main_row, text="Load", bg="#10B981", fg="white", font=("Arial", 9, "bold"), relief=tk.FLAT, cursor="hand2", command=lambda idx=i, d=item.get("data"), img=item.get("image"), pt=prompt_text: load_item(idx, d, img, pt))
+            load_btn.pack(side=tk.RIGHT, padx=(10, 5), pady=8)
+
+            for sub in sub_steps:
+                sub_row = tk.Frame(sub_frame, bg="#1F2937")
+                sub_row.pack(fill=tk.X, padx=(30, 0), pady=(0, 2))
+
+                sub_prompt = sub.get("prompt", "Unknown sub-query")
+                tk.Label(sub_row, text="↳ " + sub_prompt, bg="#1F2937", fg="#D1D5DB", font=("Arial", 10), anchor="w", wraplength=max(280, wrap_width - 40), justify=tk.LEFT).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=10, pady=6)
+
+    search_var.trace_add("write", render_history)
+    render_history()
 
 
 # ==========================================
 # UI: PROMPT WINDOW
 # ==========================================
 def show_prompt_window():
-    global prompt_win, initial_screenshot, current_lang
+    global prompt_win, initial_screenshot, current_lang, current_secret_code, debug_limit_enabled
     if prompt_win:
         prompt_win.destroy()
         
@@ -420,24 +550,49 @@ def show_prompt_window():
         
     prompt_win = tk.Toplevel(root)
     prompt_win.title("Blueprint Lens")
-    prompt_win.geometry("640x360")
+    screen_w = root.winfo_screenwidth()
+    screen_h = root.winfo_screenheight()
+    win_w = max(500, min(760, screen_w - 40))
+    collapsed_h = max(360, min(430, int(screen_h * 0.46)))
+    expanded_h = min(screen_h - 40, collapsed_h + 190)
+    current_h = collapsed_h
+    prompt_win.geometry(f"{win_w}x{current_h}")
     prompt_win.configure(bg="#111827")
     prompt_win.attributes('-topmost', True)
-    prompt_win.overrideredirect(True)
-    
-    x = (root.winfo_screenwidth() // 2) - 320
-    y = (root.winfo_screenheight() // 2) - 180
-    prompt_win.geometry(f"+{x}+{y}")
-    
+    prompt_win.resizable(True, True)
+    prompt_win.minsize(500, 360)
+
+    def recenter_window(height_value):
+        x = max(0, (screen_w - win_w) // 2)
+        y = max(0, (screen_h - height_value) // 2)
+        prompt_win.geometry(f"{win_w}x{height_value}+{x}+{y}")
+
+    recenter_window(current_h)
+
     def toggle_lang():
         global current_lang
         current_lang = "VI" if current_lang == "EN" else "EN"
         prompt_win.destroy()
         show_prompt_window()
 
+    def set_window_height(expanded):
+        nonlocal current_h
+        current_h = expanded_h if expanded else collapsed_h
+        recenter_window(current_h)
+
+    def sync_prompt_wraps(_event=None):
+        current_width = max(500, prompt_win.winfo_width())
+        wrap_width = max(360, current_width - 80)
+        prompt_instruction_lbl.config(wraplength=wrap_width)
+        prompt_tip_lbl.config(wraplength=wrap_width)
+        screenshot_tip_lbl.config(wraplength=wrap_width)
+        skip_preview_help_lbl.config(wraplength=max(300, current_width - 80))
+        skip_preview_lbl.config(wraplength=max(300, current_width - 180))
+
+
     header_frame = tk.Frame(prompt_win, bg="#111827", cursor="fleur")
     header_frame.pack(fill=tk.X, padx=20, pady=(15, 0))
-    
+
     def start_move(e): prompt_win.x, prompt_win.y = e.x, e.y
     def stop_move(e): prompt_win.x = prompt_win.y = None
     def do_move(e): prompt_win.geometry(f"+{prompt_win.winfo_x() + (e.x - prompt_win.x)}+{prompt_win.winfo_y() + (e.y - prompt_win.y)}")
@@ -445,7 +600,7 @@ def show_prompt_window():
     header_frame.bind("<ButtonPress-1>", start_move)
     header_frame.bind("<ButtonRelease-1>", stop_move)
     header_frame.bind("<B1-Motion>", do_move)
-    
+
     title_lbl = tk.Label(header_frame, text=t("title"), bg="#111827", fg="#00ffcc", font=("Arial", 16, "bold"), cursor="fleur")
     title_lbl.pack(side=tk.LEFT)
     title_lbl.bind("<ButtonPress-1>", start_move)
@@ -454,51 +609,58 @@ def show_prompt_window():
 
     lang_btn = tk.Button(header_frame, text=f"🌐 {current_lang}", bg="#3B82F6", fg="white", font=("Arial", 10, "bold"), relief=tk.FLAT, command=toggle_lang, cursor="hand2")
     lang_btn.pack(side=tk.RIGHT)
-    
-    tk.Label(prompt_win, text=t("instruction"), bg="#111827", fg="#9CA3AF", font=("Arial", 11), wraplength=550, justify=tk.LEFT).pack(padx=20, pady=(10, 10), anchor="w")
-    
+
+    prompt_instruction_lbl = tk.Label(prompt_win, text=t("instruction"), bg="#111827", fg="#9CA3AF", font=("Arial", 11), wraplength=max(360, win_w - 80), justify=tk.LEFT)
+    prompt_instruction_lbl.pack(padx=20, pady=(10, 6), anchor="w")
+    prompt_tip_lbl = tk.Label(prompt_win, text=t("quick_send_tip"), bg="#111827", fg="#6B7280", font=("Arial", 9), wraplength=max(360, win_w - 80), justify=tk.LEFT)
+    prompt_tip_lbl.pack(padx=20, pady=(0, 2), anchor="w")
+    screenshot_tip_lbl = tk.Label(prompt_win, text=t("screenshot_tip"), bg="#111827", fg="#6B7280", font=("Arial", 9), wraplength=max(360, win_w - 80), justify=tk.LEFT)
+    screenshot_tip_lbl.pack(padx=20, pady=(0, 10), anchor="w")
+
     entry = tk.Entry(prompt_win, font=("Arial", 16), bg="#1F2937", fg="white", insertbackground="white", relief=tk.FLAT)
     entry.insert(0, t("placeholder"))
     entry.bind("<FocusIn>", lambda e: entry.delete(0, tk.END) if entry.get() == t("placeholder") else None)
-    entry.pack(fill=tk.X, padx=20, pady=10, ipady=12)
+    entry.pack(fill=tk.X, padx=20, pady=(0, 10), ipady=12)
     entry.focus()
-    
-    # 2-Row Layout for cleaner UI hierarchy
-    btn_frame1 = tk.Frame(prompt_win, bg="#111827")
-    btn_frame1.pack(fill=tk.X, padx=15, pady=(15, 5))
-    
-    btn_frame2 = tk.Frame(prompt_win, bg="#111827")
-    btn_frame2.pack(fill=tk.X, padx=15, pady=(5, 15))
-    
-    def on_locate():
+
+    def send_prompt(text):
+        prompt_win.destroy()
+        show_loading_ui()
+        screen_size = (root.winfo_screenwidth(), root.winfo_screenheight())
+        threading.Thread(target=execute_analysis, args=(text, initial_screenshot, None, screen_size), daemon=True).start()
+
+    def on_send():
         text = entry.get().strip()
-        if text and text != t("placeholder"):
+        if not text or text == t("placeholder"):
+            return
+        if skip_preview_enabled:
+            send_prompt(text)
+        else:
             prompt_win.destroy()
             show_disclosure_window(text, None, initial_screenshot)
-            
+
     def on_snip():
         text = entry.get().strip()
         if text and text != t("placeholder"):
             prompt_win.destroy()
             begin_snipping_mode(text)
-            
+
     def on_cancel():
-        global initial_screenshot
-        initial_screenshot = None
-        prompt_win.destroy()
-        root.withdraw()
-        
+        shutdown_app()
+
+    prompt_win.protocol("WM_DELETE_WINDOW", on_cancel)
+
     def open_history():
         prompt_win.destroy()
         show_history_window()
-        
+
     def on_import():
         file_path = filedialog.askopenfilename(filetypes=[("Blueprint Lens Guide", "*.cguide"), ("JSON Files", "*.json")])
         if file_path:
             try:
                 with open(file_path, 'r', encoding='utf-8') as f:
                     imported_pkg = json.load(f)
-                
+
                 global initial_screenshot, current_session_history_idx
                 img_b64 = imported_pkg.get("image")
                 data = imported_pkg.get("data")
@@ -507,36 +669,118 @@ def show_prompt_window():
                     initial_screenshot = Image.open(io.BytesIO(img_bytes))
                     prompt_win.destroy()
                     root.deiconify()
-                    current_session_history_idx = -1 
+                    current_session_history_idx = -1
                     draw_overlay(data)
             except Exception as e:
                 print(f"Error importing guide: {e}")
-                
-    def on_quick_inspect():
-        prompt_win.destroy()
-        begin_quick_inspect()
 
-    # PRIMARY ACTIONS (Row 1)
-    tk.Button(btn_frame1, text=t("cancel"), bg="#EF4444", fg="white", font=("Arial", 12, "bold"), relief=tk.FLAT, command=on_cancel, cursor="hand2", pady=10).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=5)
-    tk.Button(btn_frame1, text=t("snip"), bg="#374151", fg="white", font=("Arial", 12, "bold"), relief=tk.FLAT, command=on_snip, cursor="hand2", pady=10).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=5)
-    tk.Button(btn_frame1, text=t("locate"), bg="#00ffcc", fg="black", font=("Arial", 12, "bold"), relief=tk.FLAT, command=on_locate, cursor="hand2", pady=10).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=5)
+    entry.bind("<Return>", lambda e: on_send())
+    prompt_win.bind("<Return>", lambda e: on_send())
 
-    # SECONDARY ACTIONS (Row 2)
-    tk.Button(btn_frame2, text="View History", bg="#8B5CF6", fg="white", font=("Arial", 9, "bold"), relief=tk.FLAT, command=open_history, cursor="hand2", pady=6).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=5)
-    tk.Button(btn_frame2, text="Import Guide", bg="#10B981", fg="white", font=("Arial", 9, "bold"), relief=tk.FLAT, command=on_import, cursor="hand2", pady=6).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=5)
-    tk.Button(btn_frame2, text="Quick Inspect", bg="#F59E0B", fg="white", font=("Arial", 9, "bold"), relief=tk.FLAT, command=on_quick_inspect, cursor="hand2", pady=6).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=5)
+    btn_frame1 = tk.Frame(prompt_win, bg="#111827")
+    btn_frame1.pack(fill=tk.X, padx=20, pady=(0, 8))
+    btn_frame1.grid_columnconfigure(0, weight=1)
+    btn_frame1.grid_columnconfigure(1, weight=2)
+    btn_frame1.grid_columnconfigure(2, weight=1)
+    btn_frame1.grid_columnconfigure(3, weight=1)
+
+    tk.Button(btn_frame1, text=t("cancel"), bg="#EF4444", fg="white", font=("Arial", 12, "bold"), relief=tk.FLAT, command=on_cancel, cursor="hand2", pady=10).grid(row=0, column=0, sticky="ew", padx=(0, 8))
+    tk.Frame(btn_frame1, bg="#111827").grid(row=0, column=1, sticky="ew")
+    tk.Button(btn_frame1, text=t("snip"), bg="#374151", fg="white", font=("Arial", 12, "bold"), relief=tk.FLAT, command=on_snip, cursor="hand2", pady=10).grid(row=0, column=2, sticky="ew", padx=(8, 8))
+    tk.Button(btn_frame1, text=t("send"), bg="#00ffcc", fg="black", font=("Arial", 12, "bold"), relief=tk.FLAT, command=on_send, cursor="hand2", pady=10).grid(row=0, column=3, sticky="ew")
+
+    btn_frame2 = tk.Frame(prompt_win, bg="#111827")
+    btn_frame2.pack(fill=tk.X, padx=20, pady=(0, 8))
+
+    tk.Button(btn_frame2, text="View History", bg="#8B5CF6", fg="white", font=("Arial", 9, "bold"), relief=tk.FLAT, command=open_history, cursor="hand2", pady=6).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0, 5))
+    tk.Button(btn_frame2, text="Import Guide", bg="#10B981", fg="white", font=("Arial", 9, "bold"), relief=tk.FLAT, command=on_import, cursor="hand2", pady=6).pack(side=tk.RIGHT, expand=True, fill=tk.X, padx=(5, 0))
+
+    extra_settings_visible = tk.BooleanVar(value=False)
+    extra_settings_frame = tk.Frame(prompt_win, bg="#111827")
+
+    def sync_secret_code(*_args):
+        global current_secret_code
+        current_secret_code = secret_var.get().strip()
+
+    def sync_debug_mode():
+        global debug_limit_enabled
+        debug_limit_enabled = bool(debug_var.get())
+
+    def sync_skip_preview_mode():
+        global skip_preview_enabled
+        skip_preview_enabled = bool(skip_preview_var.get())
+
+    def update_extra_settings():
+        if extra_settings_visible.get():
+            extra_settings_frame.pack(fill=tk.X, padx=20, pady=(0, 10))
+            extra_toggle_btn.config(text=f"▾ {t('extra_settings')}")
+            set_window_height(True)
+        else:
+            extra_settings_frame.pack_forget()
+            extra_toggle_btn.config(text=f"▸ {t('extra_settings')}")
+            set_window_height(False)
+
+    def toggle_extra_settings():
+        extra_settings_visible.set(not extra_settings_visible.get())
+        update_extra_settings()
+
+    extra_toggle_btn = tk.Button(prompt_win, text=f"▸ {t('extra_settings')}", bg="#1F2937", fg="#D1D5DB", font=("Arial", 9, "bold"), relief=tk.FLAT, command=toggle_extra_settings, cursor="hand2", pady=6)
+    extra_toggle_btn.pack(fill=tk.X, padx=20, pady=(0, 8))
+
+    tk.Frame(extra_settings_frame, bg="#374151", height=1).pack(fill=tk.X, pady=(2, 10))
+
+    debug_row = tk.Frame(extra_settings_frame, bg="#111827")
+    debug_row.pack(fill=tk.X)
+    debug_var = tk.BooleanVar(value=debug_limit_enabled)
+
+    tk.Checkbutton(debug_row, text="Debug", variable=debug_var, command=sync_debug_mode, bg="#111827", fg="white", selectcolor="#111827", activebackground="#111827", activeforeground="white", font=("Arial", 10, "bold")).pack(side=tk.LEFT)
+    tk.Label(debug_row, text="Force the limit response for testing.", bg="#111827", fg="#9CA3AF", font=("Arial", 9)).pack(side=tk.LEFT, padx=8)
+
+    skip_preview_row = tk.Frame(extra_settings_frame, bg="#111827")
+    skip_preview_row.pack(fill=tk.X, pady=(12, 10))
+    skip_preview_var = tk.BooleanVar(value=skip_preview_enabled)
+    tk.Checkbutton(skip_preview_row, variable=skip_preview_var, command=sync_skip_preview_mode, bg="#111827", fg="white", selectcolor="#111827", activebackground="#111827", activeforeground="white", font=("Arial", 10, "bold")).pack(side=tk.LEFT)
+    skip_preview_text = tk.Frame(skip_preview_row, bg="#111827")
+    skip_preview_text.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(8, 0))
+    skip_preview_lbl = tk.Label(skip_preview_text, text=t("skip_preview"), bg="#111827", fg="#D1D5DB", font=("Arial", 10, "bold"), wraplength=max(300, win_w - 180), justify=tk.LEFT)
+    skip_preview_lbl.pack(anchor="w")
+    skip_preview_help_lbl = tk.Label(skip_preview_text, text=t("skip_preview_help"), bg="#111827", fg="#6B7280", font=("Arial", 8), wraplength=max(300, win_w - 180), justify=tk.LEFT)
+    skip_preview_help_lbl.pack(anchor="w", pady=(2, 0))
+
+    tk.Label(extra_settings_frame, text=t("secret_dev"), bg="#111827", fg="#9CA3AF", font=("Arial", 10, "bold")).pack(anchor="w")
+
+    secret_var = tk.StringVar(value=current_secret_code)
+    secret_entry = tk.Entry(extra_settings_frame, textvariable=secret_var, font=("Arial", 12), bg="#1F2937", fg="white", insertbackground="white", relief=tk.FLAT, show="*")
+    secret_entry.pack(fill=tk.X, pady=(4, 8), ipady=8)
+
+    secret_var.trace_add("write", sync_secret_code)
+    sync_secret_code()
+    sync_debug_mode()
+    sync_skip_preview_mode()
+    update_extra_settings()
+    prompt_win.bind("<Configure>", sync_prompt_wraps)
+    sync_prompt_wraps()
 
 
 # ==========================================
-# UI: SNIPPING, QUICK INSPECT & CONTINUE
+# UI: SNIPPING & CONTINUE
 # ==========================================
-def show_continue_window():
+def show_continue_window(preview_image=None):
     global prompt_win, initial_screenshot
-    
-    # Ensure visual overlays are cleared before screenshot
-    root.update()
-    time.sleep(0.2)
-    initial_screenshot = pyautogui.screenshot()
+
+    if prompt_win and prompt_win.winfo_exists():
+        try:
+            prompt_win.destroy()
+        except Exception:
+            pass
+
+    if preview_image is None:
+        root.update_idletasks()
+        root.update()
+        time.sleep(0.2)
+        preview_image = pyautogui.screenshot()
+
+    initial_screenshot = preview_image
     
     prompt_win = tk.Toplevel(root)
     prompt_win.title("Continue Guide")
@@ -615,44 +859,8 @@ def show_continue_window():
         prompt_win.destroy()
         reset_to_prompt()
         
-    tk.Button(btn_frame, text="Cancel", bg="#EF4444", fg="white", font=("Arial", 10, "bold"), relief=tk.FLAT, command=on_cancel, cursor="hand2", padx=10, pady=5).pack(side=tk.LEFT)
-    tk.Button(btn_frame, text="Analyze", bg="#00ffcc", fg="black", font=("Arial", 10, "bold"), relief=tk.FLAT, command=on_analyze, cursor="hand2", padx=10, pady=5).pack(side=tk.RIGHT)
-
-def begin_quick_inspect():
-    global snip_win
-    snip_win = tk.Toplevel(root)
-    snip_win.attributes('-fullscreen', True)
-    snip_win.attributes('-topmost', True)
-    snip_win.configure(cursor="crosshair")
-    
-    tk_img = ImageTk.PhotoImage(initial_screenshot)
-    snip_canvas = tk.Canvas(snip_win, highlightthickness=0)
-    snip_canvas.pack(fill='both', expand=True)
-    snip_canvas.create_image(0, 0, image=tk_img, anchor='nw')
-    snip_canvas.image = tk_img 
-    
-    def on_click(e):
-        snip_win.destroy()
-        
-        x1 = max(0, e.x - 75)
-        y1 = max(0, e.y - 75)
-        x2 = min(root.winfo_screenwidth(), e.x + 75)
-        y2 = min(root.winfo_screenheight(), e.y + 75)
-        
-        snip_coords = (x1, y1, x2, y2)
-        prompt_text = "Identify the specific UI button or element at these exact coordinates and explain what it does."
-        
-        show_loading_ui()
-        screen_size = (root.winfo_screenwidth(), root.winfo_screenheight())
-        
-        full_img_to_send = initial_screenshot.copy()
-        draw = ImageDraw.Draw(full_img_to_send)
-        draw.rectangle(snip_coords, outline="red", width=6)
-        
-        threading.Thread(target=execute_analysis, args=(prompt_text, full_img_to_send, snip_coords, screen_size), daemon=True).start()
-
-    snip_canvas.bind("<ButtonRelease-1>", on_click)
-    snip_win.bind("<Escape>", lambda e:[snip_win.destroy(), show_prompt_window()])
+    tk.Button(btn_frame, text=t("go_back"), bg="#EF4444", fg="white", font=("Arial", 10, "bold"), relief=tk.FLAT, command=on_cancel, cursor="hand2", padx=10, pady=5).pack(side=tk.LEFT)
+    tk.Button(btn_frame, text=t("accept"), bg="#00ffcc", fg="black", font=("Arial", 10, "bold"), relief=tk.FLAT, command=on_analyze, cursor="hand2", padx=10, pady=5).pack(side=tk.RIGHT)
 
 def begin_snipping_mode(prompt_text):
     global snip_win
@@ -710,7 +918,7 @@ def show_disclosure_window(prompt_text, snip_coords, original_img):
     disclosure_win.minsize(420, 500)
     disclosure_win.configure(bg="#111827")
     disclosure_win.attributes('-topmost', True)
-    disclosure_win.overrideredirect(True)
+    disclosure_win.resizable(True, True)
 
     main_frame = tk.Frame(disclosure_win, bg="#111827")
     main_frame.pack(fill=tk.BOTH, expand=True)
@@ -756,6 +964,7 @@ def show_disclosure_window(prompt_text, snip_coords, original_img):
     img_lbl.pack(pady=(10, 12))
     
     tk.Label(body_content, text=t("disc_msg"), bg="#111827", fg="#D1D5DB", font=("Arial", 10), wraplength=max(260, win_w - 80), justify=tk.LEFT).pack(pady=(6, 18), anchor="w")
+    tk.Label(body_content, text="Tip: Press Enter again here to confirm and send.", bg="#111827", fg="#6B7280", font=("Arial", 9, "italic"), wraplength=max(260, win_w - 80), justify=tk.LEFT).pack(pady=(0, 14), anchor="w")
 
     btn_frame = tk.Frame(main_frame, bg="#111827")
     btn_frame.grid(row=2, column=0, sticky="ew", padx=20, pady=(0, 20))
@@ -774,6 +983,8 @@ def show_disclosure_window(prompt_text, snip_coords, original_img):
         
     tk.Button(btn_frame, text=t("go_back"), bg="#374151", fg="white", font=("Arial", 10, "bold"), relief=tk.FLAT, bd=0, command=on_back, cursor="hand2", padx=10, pady=8).grid(row=0, column=0, sticky="ew", padx=(0, 5))
     tk.Button(btn_frame, text=t("accept"), bg="#00ffcc", fg="black", font=("Arial", 10, "bold"), relief=tk.FLAT, bd=0, command=on_accept, cursor="hand2", padx=10, pady=8).grid(row=0, column=1, sticky="ew", padx=(5, 0))
+    disclosure_win.bind("<Return>", lambda e: on_accept())
+    disclosure_win.bind("<Escape>", lambda e: on_back())
 
 
 # ==========================================
@@ -1127,11 +1338,7 @@ def draw_overlay(data):
 
 
 def on_hotkey():
-    global initial_screenshot, current_session_history_idx, last_user_prompt
-    initial_screenshot = None
-    current_session_history_idx = -1
-    last_user_prompt = ""
-    root.after(0, show_prompt_window)
+    root.after(0, begin_quick_prompt_flow)
 
 
 def on_hotkey_event(event=None):
@@ -1152,14 +1359,19 @@ def register_hotkey():
 # Init
 root.withdraw()
 print("[*] Blueprint Lens Bridge active.")
-print("[*] Listening for Ctrl+Shift+Q ...")
+print("[*] Ctrl+Shift+Q captures a clean screenshot and opens the continuation prompt.")
 
 if sys.platform == "win32":
-    signal.signal(signal.SIGINT, signal.SIG_IGN)
+    signal.signal(signal.SIGINT, shutdown_app)
     if hasattr(signal, "SIGBREAK"):
-        signal.signal(signal.SIGBREAK, signal.SIG_IGN)
+        signal.signal(signal.SIGBREAK, shutdown_app)
+    if hasattr(signal, "SIGTERM"):
+        signal.signal(signal.SIGTERM, shutdown_app)
+
+root.protocol("WM_DELETE_WINDOW", shutdown_app)
 
 register_hotkey()
 
 root.after(100, check_queue)
+root.after(0, show_prompt_window)
 root.mainloop()

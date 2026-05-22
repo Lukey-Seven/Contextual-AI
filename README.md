@@ -1,6 +1,6 @@
 # Blueprint Lens
 
-Blueprint Lens is a Windows desktop app that captures screenshots and turns them into step-by-step AI guidance. When the app launches, the main prompt opens automatically so you can start immediately.
+Blueprint Lens is a Windows desktop app that captures screenshots and turns them into step-by-step AI guidance. It is a student project, and the simplest way to use it is to download the `.exe` and run it.
 
 ## What it does
 
@@ -14,13 +14,20 @@ Blueprint Lens is a Windows desktop app that captures screenshots and turns them
 ## Requirements
 
 - Windows
-- Python 3.x
 - Internet access
 - Permission to capture screenshots and listen for global hotkeys
 
+## Quick Start
+
+1. Download the app executable.
+2. Run the `.exe` on Windows.
+3. The main prompt opens right away so you can start asking questions.
+
+If Windows Defender or another antivirus warns about the executable, make sure the file really came from this project and only proceed if you trust it. The app is a student-built project and does not include intentional malicious code.
+
 ## Install
 
-If you want the simplest setup, use VS Code. You do not need VS Code to run the app, but it makes setup easier.
+You only need the Python setup below if you want to run or rebuild the source version.
 
 ### Using VS Code
 
@@ -64,17 +71,17 @@ Start the app with:
 python contextual_ai_app.py
 ```
 
-The prompt window should appear immediately after launch.
+The prompt window should appear immediately after launch. If you are using the `.exe`, just double-click it instead of running the Python file.
 
 ## How to use
 
 1. Type a question into the main prompt.
 2. Use `Send` to analyze the current screenshot.
-3. Use `Locate` if you want the app to analyze the full screenshot after the consent step.
-4. Use `Snip` if you want to highlight a specific region first.
-5. Use `View History` to reopen saved guides.
-6. Use `Import Guide` to load a previously exported `.cguide` or `.json` file.
-7. Use `Quick Inspect` to click a point on the screen and analyze the nearby UI.
+3. Use `Ask a specific area` if you want to highlight a specific region first.
+4. Use `View History` to reopen saved guides.
+5. Use `Import Guide` to load a previously exported `.cguide` or `.json` file.
+6. Press `Enter` to send faster. If skip preview is off, the app shows a confirmation screen and you press `Enter` again to confirm.
+7. Open `Extra settings` only when you need developer controls like the secret code, debug limit, or skip preview.
 
 ## Hotkey behavior
 
@@ -88,10 +95,12 @@ The prompt window should appear immediately after launch.
 - `contextual_ai_app.py` is the main app.
 - `saved_history.json` stores your local guide history.
 - `output/` is used for generated output.
-- `backup/` contains older copies of the app.
+- `contextual_ai_app.spec` is the PyInstaller build recipe for the executable.
+- `build/` contains generated build artifacts and can be deleted if you only want the source.
 
 ## Notes
 
 - The app relies on a remote AI service for analysis, so internet access is required.
 - Closing the app window exits the program.
 - If you start it from a terminal and close the terminal, the app process ends with it.
+- `Ctrl+Shift+Q` opens the quick screenshot flow while the app is still running.
