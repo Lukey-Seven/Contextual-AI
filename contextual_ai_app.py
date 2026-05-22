@@ -134,6 +134,27 @@ def load_and_display_image(url, label):
         label.after(0, lambda: label.config(text="[Image failed to load]", fg="#EF4444"))
 
 
+def capture_current_screen_for_prompt():
+    global initial_screenshot
+    if prompt_win and prompt_win.winfo_exists():
+        prompt_win.withdraw()
+        prompt_win.update_idletasks()
+        prompt_win.update()
+
+    root.update_idletasks()
+    root.update()
+    time.sleep(0.15)
+    captured = pyautogui.screenshot()
+    initial_screenshot = captured
+
+    if prompt_win and prompt_win.winfo_exists():
+        prompt_win.deiconify()
+        prompt_win.lift()
+        prompt_win.focus_force()
+
+    return captured
+
+
 # ==========================================
 # AI PROCESSING CORE
 # ==========================================
@@ -544,9 +565,7 @@ def show_prompt_window():
     global prompt_win, initial_screenshot, current_lang, current_secret_code, debug_limit_enabled
     if prompt_win:
         prompt_win.destroy()
-        
-    if not initial_screenshot:
-        initial_screenshot = pyautogui.screenshot()
+    initial_screenshot = None
         
     prompt_win = tk.Toplevel(root)
     prompt_win.title("Blueprint Lens")
@@ -633,17 +652,22 @@ def show_prompt_window():
         text = entry.get().strip()
         if not text or text == t("placeholder"):
             return
+        captured_image = capture_current_screen_for_prompt()
         if skip_preview_enabled:
-            send_prompt(text)
+            prompt_win.destroy()
+            show_loading_ui()
+            screen_size = (root.winfo_screenwidth(), root.winfo_screenheight())
+            threading.Thread(target=execute_analysis, args=(text, captured_image, None, screen_size), daemon=True).start()
         else:
             prompt_win.destroy()
-            show_disclosure_window(text, None, initial_screenshot)
+            show_disclosure_window(text, None, captured_image)
 
     def on_snip():
         text = entry.get().strip()
         if text and text != t("placeholder"):
+            captured_image = capture_current_screen_for_prompt()
             prompt_win.destroy()
-            begin_snipping_mode(text)
+            begin_snipping_mode(text, captured_image)
 
     def on_cancel():
         shutdown_app()
@@ -862,14 +886,14 @@ def show_continue_window(preview_image=None):
     tk.Button(btn_frame, text=t("go_back"), bg="#EF4444", fg="white", font=("Arial", 10, "bold"), relief=tk.FLAT, command=on_cancel, cursor="hand2", padx=10, pady=5).pack(side=tk.LEFT)
     tk.Button(btn_frame, text=t("accept"), bg="#00ffcc", fg="black", font=("Arial", 10, "bold"), relief=tk.FLAT, command=on_analyze, cursor="hand2", padx=10, pady=5).pack(side=tk.RIGHT)
 
-def begin_snipping_mode(prompt_text):
+def begin_snipping_mode(prompt_text, preview_image):
     global snip_win
     snip_win = tk.Toplevel(root)
     snip_win.attributes('-fullscreen', True)
     snip_win.attributes('-topmost', True)
     snip_win.configure(cursor="crosshair")
     
-    tk_img = ImageTk.PhotoImage(initial_screenshot)
+    tk_img = ImageTk.PhotoImage(preview_image)
     snip_canvas = tk.Canvas(snip_win, highlightthickness=0)
     snip_canvas.pack(fill='both', expand=True)
     snip_canvas.create_image(0, 0, image=tk_img, anchor='nw')
@@ -891,7 +915,7 @@ def begin_snipping_mode(prompt_text):
         snip_win.destroy()
         
         if abs(x2 - x1) > 15 and abs(y2 - y1) > 15:
-            show_disclosure_window(prompt_text, (x1, y1, x2, y2), initial_screenshot)
+            show_disclosure_window(prompt_text, (x1, y1, x2, y2), preview_image)
         else:
             show_prompt_window()
 
