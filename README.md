@@ -4,6 +4,8 @@ Blueprint Lens is a Windows desktop app that captures screenshots and turns them
 
 **Important:** If the main hosted server is down or unreachable, you can still use the tool by entering your own API keys in `Extra settings`. Add a Gemini key first, or use the OpenAI and Groq overrides if you prefer those backends.
 
+**Screen resolution note:** Blueprint Lens works best at `1920x1080` (HD). Other screen resolutions may cause some inaccuracies in the pointed locations shown by the guides.
+
 ## What it does
 
 - Opens a prompt window on launch
