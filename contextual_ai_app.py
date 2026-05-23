@@ -20,6 +20,46 @@ from PIL import Image, ImageTk, ImageDraw
 
 # --- CONFIGURATION ---
 app_queue = queue.Queue()
+DEFAULT_PROXY_URL = os.environ.get("BLUEPRINT_PROXY_URL", "https://blueprintlens.digital/proxy.php")
+DIRECT_GEMINI_MODEL = os.environ.get("BLUEPRINT_GEMINI_MODEL", "gemini-3-flash-preview")
+SETTINGS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app_settings.json")
+
+
+def load_app_settings():
+    try:
+        if os.path.exists(SETTINGS_FILE):
+            with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                return data if isinstance(data, dict) else {}
+    except Exception:
+        pass
+    return {}
+
+
+def save_app_settings(settings):
+    try:
+        existing = load_app_settings()
+        existing.update(settings)
+        with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(existing, f, ensure_ascii=False, indent=2)
+    except Exception as exc:
+        print(f"Failed to save app settings: {exc}")
+
+
+def normalize_api_key_overrides(raw_keys):
+    # These overrides let a user-owned key replace the built-in proxy key for each backend.
+    normalized = {
+        "gemini": "",
+        "openai": "",
+        "groq": "",
+        "gemini_backup": "",
+    }
+
+    if isinstance(raw_keys, dict):
+        for key in normalized:
+            normalized[key] = str(raw_keys.get(key, "") or "").strip()
+
+    return normalized
 
 # Global States
 side_panel = None
@@ -36,14 +76,18 @@ initial_screenshot = None
 current_session_history_idx = -1
 last_user_prompt = ""
 current_secret_code = ""
+# Keep the field blank unless the user already saved a custom proxy URL.
+current_proxy_url = str(load_app_settings().get("proxy_url") or "").strip()
+current_api_keys = normalize_api_key_overrides(load_app_settings().get("api_keys"))
 debug_limit_enabled = False
 skip_preview_enabled = False
+last_analysis_request = None
 
 # --- LOCALIZATION DICTIONARY ---
 LANG_DICT = {
     "EN": {
         "title": "Blueprint Lens",
-        "instruction": "Type a question, then press Enter or Send to analyze instantly. Use Snip for a specific area, and expand Extra settings only when you need them.",
+        "instruction": "Type a question, then press Enter or Send to analyze instantly.",
         "quick_send_tip": "Tip: Press Enter to send instantly. If Skip preview is off, Enter opens a confirmation screen and you must press Enter again to confirm.",
         "screenshot_tip": "Tip: Ctrl+Shift+Q lets you take a screenshot anytime while the app is still running.",
         "placeholder": "Enter your question for the AI here!",
@@ -57,7 +101,7 @@ LANG_DICT = {
         "ai_guide": "AI Guide",
         "thinking": "Blueprint Lens is thinking",
         "disc_title": "Privacy & Data Consent",
-        "disc_msg": "Just a heads up from the developer!\n\nThis is a student project. To analyze your request, your screenshot is sent to Google Gemini (using my paid plan, so your data is NOT used for training). If my paid limit is reached, the system may fallback to OpenAI as a backup, where data may be used for model training.\n\nBy continuing, you help the AI learn to recognize UI patterns for better guides in the future. No personal data is stored permanently.",
+        "disc_msg": "Just a heads up from the developer!\n\nThis is a student project. To analyze your request, your screenshot is sent to Google Gemini (using my paid plan, so your data is NOT used for training). If the main server is unavailable, you can put your own API key in the Extra settings to continue.\n\nBy continuing, you help the AI learn to recognize UI patterns for better guides in the future. No personal data is stored permanently.",
         "accept": "Accept & Analyze",
         "go_back": "Go Back",
         "log_start": "Initializing AI Vision Engine...",
@@ -68,13 +112,21 @@ LANG_DICT = {
         "history_search": "Search local history",
         "history_search_hint": "Matches keyword searches against previous prompts.",
         "extra_settings": "Extra settings",
+        "proxy_url": "Backend URL",
+        "proxy_url_help": "Optional. Leave blank to use the built-in proxy, or paste your own proxy.php URL to override it.",
+        "api_keys_section": "Optional API key overrides",
+        "api_keys_help": "If filled, these keys let the app use your own service keys when the hosted server is down. Leave blank to use the default service keys.",
+        "gemini_api_key": "Gemini API key",
+        "openai_api_key": "OpenAI API key",
+        "groq_api_key": "Groq API key",
+        "gemini_backup_key": "Backup Gemini key",
         "skip_preview": "Skip preview before sending (not recommended)",
         "skip_preview_help": "When enabled, Enter sends immediately without the confirmation screen.",
         "secret_dev": "Secret Code for Developer",
     },
     "VI": {
         "title": "Blueprint Lens",
-        "instruction": "Nhập câu hỏi của bạn, sau đó nhấn Enter hoặc Gửi để phân tích ngay. Dùng Chọn khu vực cho một vùng cụ thể và chỉ mở Cài đặt bổ sung khi cần.",
+        "instruction": "Nhập câu hỏi của bạn, sau đó nhấn Enter hoặc Gửi để phân tích ngay.",
         "quick_send_tip": "Mẹo: Nhấn Enter để gửi ngay. Nếu tắt bỏ qua xem trước, Enter sẽ mở màn hình xác nhận và bạn phải nhấn Enter thêm lần nữa để xác nhận.",
         "screenshot_tip": "Mẹo: Ctrl+Shift+Q cho phép chụp ảnh màn hình bất cứ lúc nào miễn là ứng dụng vẫn đang chạy.",
         "placeholder": "Hãy nhập câu hỏi cho AI tại đây!",
@@ -88,7 +140,7 @@ LANG_DICT = {
         "ai_guide": "Hướng dẫn AI",
         "thinking": "AI đang suy nghĩ",
         "disc_title": "Quyền riêng tư & Dữ liệu",
-        "disc_msg": "Thông báo nhỏ từ nhà phát triển!\n\nĐây là dự án của sinh viên. Để phân tích yêu cầu, ảnh chụp màn hình sẽ được gửi đến Google Gemini. Nếu hạn mức trả phí hết, hệ thống có thể chuyển sang OpenAI.\n\nBằng cách tiếp tục, bạn đang giúp AI học cách nhận diện giao diện tốt hơn trong tương lai.",
+        "disc_msg": "Thông báo nhỏ từ nhà phát triển!\n\nĐây là dự án của sinh viên. Để phân tích yêu cầu, ảnh chụp màn hình thường được gửi đến Google Gemini. Nếu máy chủ này không hoạt động, bạn vẫn có thể dùng công cụ bằng cách thêm khóa API của riêng mình trong Cài đặt bổ sung.\n\nBằng cách tiếp tục, bạn đang giúp AI học cách nhận diện giao diện tốt hơn trong tương lai.",
         "accept": "Chấp nhận & Phân tích",
         "go_back": "Quay lại",
         "log_start": "Đang khởi tạo Động cơ Thị giác AI...",
@@ -99,6 +151,14 @@ LANG_DICT = {
         "history_search": "Tìm trong lịch sử cục bộ",
         "history_search_hint": "Khớp tìm kiếm theo từ khóa với các câu hỏi trước đó.",
         "extra_settings": "Cài đặt bổ sung",
+        "proxy_url": "URL máy chủ",
+        "proxy_url_help": "Tùy chọn. Để trống để dùng proxy sẵn có, hoặc dán URL proxy.php của riêng bạn để ghi đè.",
+        "api_keys_section": "Ghi đè khóa API tùy chọn",
+        "api_keys_help": "Nếu điền vào đây, các khóa này sẽ ghi đè khóa mặc định của proxy. Để trống để dùng khóa dịch vụ sẵn có.",
+        "gemini_api_key": "Khóa API Gemini",
+        "openai_api_key": "Khóa API OpenAI",
+        "groq_api_key": "Khóa API Groq",
+        "gemini_backup_key": "Khóa Gemini dự phòng",
         "skip_preview": "Bỏ qua xem trước trước khi gửi (không khuyến nghị)",
         "skip_preview_help": "Khi bật, Enter sẽ gửi ngay mà không mở màn hình xác nhận.",
         "secret_dev": "Mã bí mật cho nhà phát triển",
@@ -109,6 +169,13 @@ current_lang = "EN"
 
 def t(key):
     return LANG_DICT[current_lang].get(key, key)
+
+
+def clone_image_for_retry(image_obj):
+    try:
+        return image_obj.copy()
+    except Exception:
+        return image_obj
 
 # ==========================================
 # ASYNC IMAGE LOADER (MARKDOWN PARSING)
@@ -136,85 +203,380 @@ def load_and_display_image(url, label):
 
 def capture_current_screen_for_prompt():
     global initial_screenshot
-    if prompt_win and prompt_win.winfo_exists():
-        prompt_win.withdraw()
-        prompt_win.update_idletasks()
-        prompt_win.update()
 
+    # Close the visible UI before grabbing the screen so the capture stays clean.
+    close_windows_for_capture()
     root.update_idletasks()
     root.update()
-    time.sleep(0.15)
+    time.sleep(0.3)
     captured = pyautogui.screenshot()
     initial_screenshot = captured
 
-    if prompt_win and prompt_win.winfo_exists():
-        prompt_win.deiconify()
-        prompt_win.lift()
-        prompt_win.focus_force()
-
     return captured
+
+
+def has_custom_api_keys(api_keys=None):
+    # If the user filled any key slot, bypass the proxy and talk to providers directly.
+    active_keys = normalize_api_key_overrides(api_keys if api_keys is not None else current_api_keys)
+    return any(
+        str(active_keys.get(key, "") or "").strip()
+        for key in ("gemini", "gemini_backup", "openai", "groq")
+    )
+
+
+def build_actual_prompt(user_prompt, previous_context=None):
+    if previous_context:
+        return f"[Previous Step Context: {previous_context}] User's Next Question: {user_prompt}"
+    return user_prompt
+
+
+def build_direct_analysis_prompt(user_prompt, previous_context=None, has_highlight=False):
+    language_name = "English" if current_lang == "EN" else "Vietnamese"
+    context_line = f"[Previous Step Context: {previous_context}]\n" if previous_context else ""
+    highlight_line = (
+        "The user has marked a red highlight box in the image. Focus on the element inside that box.\n"
+        if has_highlight
+        else ""
+    )
+
+    return (
+        "IMPORTANT: OUTPUT STRICTLY VALID RAW JSON ONLY. DO NOT WRAP IN MARKDOWN BACKTICKS.\n"
+        "You are an expert visual UI assistant. You help users locate elements in software interfaces.\n"
+        "Your TOP priority is spatial accuracy. Map coordinates precisely from the provided image.\n\n"
+        f"{context_line}"
+        f"User request: {user_prompt}\n\n"
+        f"{highlight_line}"
+        "Task:\n"
+        "1) Identify the exact UI element(s) needed to answer the user.\n"
+        "2) Return normalized bounding boxes as x1, y1, x2, y2 values in the 0-1000 range.\n"
+        "3) Provide concise title and description text for each step.\n"
+        "4) Generate as many steps as needed to fully solve the user's request.\n"
+        "5) Include a spatial_reasoning field, a youtube_search_term, google_search_1, google_search_2, and confidence for each step.\n\n"
+        f"Write the title and description in {language_name}. Do not use markdown fences.\n\n"
+        "Return JSON in this shape only:\n"
+        "{\n"
+        "  \"steps\": [\n"
+        "    {\n"
+        "      \"spatial_reasoning\": \"...\",\n"
+        "      \"bbox\": {\"x1\": 0, \"y1\": 0, \"x2\": 0, \"y2\": 0},\n"
+        "      \"title\": \"...\",\n"
+        "      \"description\": \"...\",\n"
+        "      \"youtube_search_term\": \"...\",\n"
+        "      \"google_search_1\": \"...\",\n"
+        "      \"google_search_2\": \"...\",\n"
+        "      \"confidence\": 95\n"
+        "    }\n"
+        "  ]\n"
+        "}\n"
+    )
+
+
+def extract_json_blob(text_response):
+    if not isinstance(text_response, str):
+        return "{}"
+
+    match = re.search(r"\{.*\}", text_response, re.S)
+    if match:
+        return match.group(0).strip()
+
+    return text_response.strip() or "{}"
+
+
+def extract_first_json_object(text_response):
+    if not isinstance(text_response, str):
+        return "{}"
+
+    candidate = text_response.strip()
+    if not candidate:
+        return "{}"
+
+    decoder = json.JSONDecoder()
+    try:
+        parsed, _end_index = decoder.raw_decode(candidate)
+    except Exception:
+        cleaned_text = extract_json_blob(candidate)
+        try:
+            parsed, _end_index = decoder.raw_decode(cleaned_text)
+        except Exception:
+            return cleaned_text
+
+    if isinstance(parsed, (dict, list)):
+        return json.dumps(parsed, ensure_ascii=False)
+
+    return candidate
+
+
+def parse_ai_output_text(text_response):
+    cleaned_text = extract_first_json_object(text_response)
+    parsed = json.loads(cleaned_text)
+    if isinstance(parsed, list):
+        return {"steps": parsed}
+    if isinstance(parsed, str):
+        return parse_ai_output_text(parsed)
+    if not isinstance(parsed, dict):
+        raise ValueError(f"Unexpected AI output format: {type(parsed).__name__}.")
+    return parsed
+
+
+def call_gemini_direct(prompt, image_b64, mime_type, api_key):
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{DIRECT_GEMINI_MODEL}:generateContent?key={api_key}"
+    payload = {
+        "contents": [
+            {
+                "parts": [
+                    {"text": prompt},
+                    {"inline_data": {"mime_type": mime_type, "data": image_b64}},
+                ]
+            }
+        ],
+        "generationConfig": {"response_mime_type": "application/json", "temperature": 0.1},
+    }
+
+    for attempt in range(1, 3):
+        try:
+            response = requests.post(url, json=payload, timeout=60)
+            try:
+                data = response.json()
+            except Exception:
+                raise ValueError("Invalid Gemini response while using your own key.")
+
+            if response.status_code == 429:
+                return {"rate_limit": True}
+
+            error_block = data.get("error")
+            if response.status_code != 200 or error_block:
+                if isinstance(error_block, dict):
+                    error_message = error_block.get("message", "Unknown Gemini error.")
+                else:
+                    error_message = str(error_block or "Unknown Gemini error.")
+                if any(word in error_message.lower() for word in ("quota", "exhausted", "limit")):
+                    return {"rate_limit": True}
+                raise ValueError(f"Gemini API Error: {error_message}")
+
+            text = data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "{}")
+            return {"text": text, "used_server": "Gemini 3 Flash (direct)"}
+        except requests.exceptions.RequestException as exc:
+            if attempt < 2:
+                time.sleep(0.6)
+                continue
+            raise ConnectionError("Could not reach Gemini directly.") from exc
+
+
+def call_openai_direct(prompt, image_b64, mime_type, api_key):
+    url = "https://api.openai.com/v1/chat/completions"
+    payload = {
+        "model": "gpt-5.4-mini",
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{image_b64}"}},
+                ],
+            }
+        ],
+        "temperature": 0.1,
+        "response_format": {"type": "json_object"},
+    }
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}",
+    }
+
+    response = requests.post(url, json=payload, headers=headers, timeout=60)
+    try:
+        data = response.json()
+    except Exception:
+        raise ValueError("Invalid OpenAI response while using your own key.")
+
+    if response.status_code == 429:
+        return {"rate_limit": True}
+
+    if response.status_code != 200 or data.get("error"):
+        error_block = data.get("error")
+        if isinstance(error_block, dict):
+            error_message = error_block.get("message", "Unknown OpenAI error.")
+        else:
+            error_message = str(error_block or "Unknown OpenAI error.")
+        if any(word in error_message.lower() for word in ("quota", "exhausted", "limit")):
+            return {"rate_limit": True}
+        raise ValueError(f"OpenAI API Error: {error_message}")
+
+    return {
+        "text": data.get("choices", [{}])[0].get("message", {}).get("content", "{}"),
+        "used_server": "ChatGPT (direct)",
+    }
+
+
+def call_groq_direct(prompt, image_b64, mime_type, api_key):
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    payload = {
+        "model": "meta-llama/llama-4-scout-17b-16e-instruct",
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{image_b64}"}},
+                ],
+            }
+        ],
+        "temperature": 0.1,
+        "response_format": {"type": "json_object"},
+    }
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}",
+    }
+
+    response = requests.post(url, json=payload, headers=headers, timeout=60)
+    try:
+        data = response.json()
+    except Exception:
+        raise ValueError("Invalid Groq response while using your own key.")
+
+    if response.status_code == 429:
+        return {"rate_limit": True}
+
+    if response.status_code != 200 or data.get("error"):
+        error_block = data.get("error")
+        if isinstance(error_block, dict):
+            error_message = error_block.get("message", "Unknown Groq error.")
+        else:
+            error_message = str(error_block or "Unknown Groq error.")
+        if any(word in error_message.lower() for word in ("quota", "exhausted", "limit")):
+            return {"rate_limit": True}
+        raise ValueError(f"Groq API Error: {error_message}")
+
+    return {
+        "text": data.get("choices", [{}])[0].get("message", {}).get("content", "{}"),
+        "used_server": "Llama 4 Scout (direct)",
+    }
+
+
+def perform_direct_analysis(actual_prompt, img_b64, mime_type, api_keys=None):
+    # Try the user-owned keys first so the app can work without the hosted proxy.
+    candidates = []
+    seen = set()
+    active_keys = normalize_api_key_overrides(api_keys if api_keys is not None else current_api_keys)
+
+    for backend_name, key_name in (("gemini", "gemini"), ("gemini", "gemini_backup"), ("openai", "openai"), ("groq", "groq")):
+        api_key = str(active_keys.get(key_name, "") or "").strip()
+        if not api_key:
+            continue
+        candidate_id = (backend_name, api_key)
+        if candidate_id in seen:
+            continue
+        seen.add(candidate_id)
+        candidates.append((backend_name, api_key))
+
+    if not candidates:
+        raise ValueError("No custom API keys were provided.")
+
+    last_error = None
+    for backend_name, api_key in candidates:
+        app_queue.put({"log": f"Trying {backend_name.title()} with your own key..."})
+        try:
+            if backend_name == "gemini":
+                result = call_gemini_direct(actual_prompt, img_b64, mime_type, api_key)
+            elif backend_name == "openai":
+                result = call_openai_direct(actual_prompt, img_b64, mime_type, api_key)
+            else:
+                result = call_groq_direct(actual_prompt, img_b64, mime_type, api_key)
+
+            if result.get("rate_limit"):
+                last_error = ValueError(f"{backend_name.title()} rate limit reached.")
+                continue
+
+            return result
+        except Exception as exc:
+            last_error = exc
+
+    if last_error:
+        raise last_error
+
+    raise ValueError("Unable to complete direct analysis with the provided keys.")
+
+
+def perform_proxy_analysis(actual_prompt, img_b64, snip_coords, api_keys=None):
+    proxy_url = (current_proxy_url or DEFAULT_PROXY_URL).strip()
+    active_keys = normalize_api_key_overrides(api_keys if api_keys is not None else current_api_keys)
+
+    payload = {
+        "image": img_b64,
+        "mimeType": "image/jpeg",
+        "prompt": actual_prompt,
+        "hasHighlight": bool(snip_coords),
+        "language": current_lang,
+        "detailLevel": "detailed",
+        "modelBackend": "smart",
+        "secret_key": current_secret_code.strip(),
+        "debug_limit": debug_limit_enabled,
+        "api_keys": active_keys,
+    }
+
+    headers = {"X-Project-Secret": "SUPaSecureD_Key123!#"}
+
+    last_error = None
+    for attempt in range(1, 4):
+        try:
+            app_queue.put({"log": t("log_analyze")})
+            response = requests.post(proxy_url, json=payload, headers=headers, timeout=90)
+
+            try:
+                data = response.json()
+            except Exception:
+                raise ValueError("Invalid server response. Check proxy URL.")
+
+            if response.status_code == 429 or data.get("error") == "OUT_OF_CREDITS":
+                raise ValueError(data.get("message", "You have reached the request limit. Please wait or buy more credits."))
+
+            if response.status_code != 200 or "error" in data:
+                raise ValueError(data.get("error", "Unknown server error."))
+
+            return data, data.get("used_server", "Smart Proxy")
+        except requests.exceptions.RequestException as exc:
+            last_error = ConnectionError(
+                "Cannot connect to the proxy server. If the Namecheap domain is offline, use your own API keys in Extra settings or point Backend URL to another live proxy."
+            )
+            if attempt < 3:
+                app_queue.put({"log": f"Retrying... ({attempt}/3)"})
+                time.sleep(0.6)
+                continue
+            raise last_error from exc
+        except Exception as exc:
+            last_error = exc
+            if attempt < 3:
+                app_queue.put({"log": f"Retrying... ({attempt}/3)"})
+                time.sleep(0.6)
+                continue
+            raise last_error
 
 
 # ==========================================
 # AI PROCESSING CORE
 # ==========================================
-def execute_analysis(user_prompt, image_obj, snip_coords, screen_size, previous_context=None, is_continuation=False):
+def execute_analysis(user_prompt, image_obj, snip_coords, screen_size, previous_context=None, is_continuation=False, force_proxy=False, api_keys_override=None):
     global current_session_history_idx, last_user_prompt, current_secret_code, debug_limit_enabled
+    active_api_keys = normalize_api_key_overrides(api_keys_override if api_keys_override is not None else current_api_keys)
     try:
         app_queue.put({"log": t("log_upload")})
         
         buffer = io.BytesIO()
         image_obj.save(buffer, format="JPEG", quality=85)
         img_b64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
-        
-        proxy_url = "https://dms.onl/s4106115/proxy.php" 
-        
-        # Formulate chained context string
-        actual_prompt = user_prompt
-        if previous_context:
-            actual_prompt = f"[Previous Step Context: {previous_context}] User's Next Question: {user_prompt}"
-        
-        payload = {
-            "image": img_b64,
-            "mimeType": "image/jpeg",
-            "prompt": actual_prompt,
-            "hasHighlight": bool(snip_coords),
-            "language": current_lang,
-            "detailLevel": "detailed",
-            "modelBackend": "smart",
-            "secret_key": current_secret_code.strip(),
-            "debug_limit": debug_limit_enabled
-        }
-        
-        headers = {
-            "X-Project-Secret": "SUPaSecureD_Key123!#"
-        }
+        actual_prompt = build_actual_prompt(user_prompt, previous_context)
+        direct_prompt = build_direct_analysis_prompt(user_prompt, previous_context, bool(snip_coords))
 
-        last_error = None
-        for attempt in range(1, 4):
-            try:
-                app_queue.put({"log": t("log_analyze")})
-                response = requests.post(proxy_url, json=payload, headers=headers, timeout=90)
-
-                try:
-                    data = response.json()
-                except Exception:
-                    raise ValueError("Invalid server response. Check proxy URL.")
-
-                if response.status_code == 429 or data.get("error") == "OUT_OF_CREDITS":
-                    raise ValueError(data.get("message", "You have reached the request limit. Please wait or buy more credits."))
-
-                if response.status_code != 200 or "error" in data:
-                    raise ValueError(data.get("error", "Unknown server error."))
-
-                break
-            except Exception as e:
-                last_error = e
-                if attempt < 3:
-                    app_queue.put({"log": f"Retrying... ({attempt}/3)"})
-                    time.sleep(0.6)
-                else:
-                    raise last_error
+        if has_custom_api_keys(active_api_keys) and not force_proxy:
+            direct_result = perform_direct_analysis(direct_prompt, img_b64, "image/jpeg", active_api_keys)
+            data = parse_ai_output_text(direct_result.get("text", "{}"))
+            if isinstance(data, dict) and "steps" not in data:
+                data = {"steps": [data]}
+            used_server = direct_result.get("used_server", "Direct provider")
+        else:
+            proxy_api_keys = {} if force_proxy else active_api_keys
+            data, used_server = perform_proxy_analysis(actual_prompt, img_b64, snip_coords, proxy_api_keys)
             
         unique_steps =[]
         seen_titles = set()
@@ -257,11 +619,51 @@ def execute_analysis(user_prompt, image_obj, snip_coords, screen_size, previous_
             
         last_user_prompt = user_prompt
         
-        app_queue.put({"log": t("log_done")})
+        app_queue.put({"log": f"{t('log_done')} [{used_server}]"})
         app_queue.put({"data": data})
         
+    except ConnectionError as e:
+        if has_custom_api_keys(active_api_keys) and not force_proxy:
+            app_queue.put({"direct_error": str(e)})
+        else:
+            app_queue.put({"proxy_error": str(e)})
     except Exception as e:
-        app_queue.put({"error": str(e), "reset_prompt": True})
+        if has_custom_api_keys(active_api_keys) and not force_proxy:
+            app_queue.put({"direct_error": str(e)})
+        else:
+            app_queue.put({"error": str(e), "reset_prompt": True})
+
+
+def store_last_analysis_request(user_prompt, image_obj, snip_coords, screen_size, previous_context=None, is_continuation=False):
+    global last_analysis_request
+
+    last_analysis_request = {
+        "user_prompt": user_prompt,
+        "image_obj": clone_image_for_retry(image_obj),
+        "snip_coords": snip_coords,
+        "screen_size": screen_size,
+        "previous_context": previous_context,
+        "is_continuation": is_continuation,
+    }
+
+
+def launch_analysis_thread(user_prompt, image_obj, snip_coords, screen_size, previous_context=None, is_continuation=False, force_proxy=False, api_keys_override=None):
+    store_last_analysis_request(user_prompt, image_obj, snip_coords, screen_size, previous_context, is_continuation)
+    show_loading_ui()
+    threading.Thread(
+        target=execute_analysis,
+        kwargs={
+            "user_prompt": user_prompt,
+            "image_obj": image_obj,
+            "snip_coords": snip_coords,
+            "screen_size": screen_size,
+            "previous_context": previous_context,
+            "is_continuation": is_continuation,
+            "force_proxy": force_proxy,
+            "api_keys_override": api_keys_override,
+        },
+        daemon=True,
+    ).start()
 
 def check_queue():
     try:
@@ -271,6 +673,12 @@ def check_queue():
                 draw_overlay(msg["data"])
             elif "log" in msg:
                 update_terminal_log(msg["log"])
+            elif "proxy_error" in msg:
+                update_terminal_log(f"ERROR: {msg['proxy_error']}", is_error=True)
+                root.after(0, lambda m=msg["proxy_error"]: show_backend_unavailable_dialog(m))
+            elif "direct_error" in msg:
+                update_terminal_log(f"ERROR: {msg['direct_error']}", is_error=True)
+                root.after(0, lambda m=msg["direct_error"]: show_direct_key_retry_dialog(m))
             elif "error" in msg:
                 update_terminal_log(f"ERROR: {msg['error']}", is_error=True)
                 if msg.get("reset_prompt"):
@@ -378,6 +786,192 @@ def reset_to_prompt():
     last_user_prompt = ""
     
     show_prompt_window()
+
+
+def show_backend_unavailable_dialog(message):
+    # Keep this dialog simple so the user has one obvious exit: go back and enter their own key.
+    global loading_panel
+
+    if loading_panel and loading_panel.winfo_exists():
+        try:
+            loading_panel.destroy()
+        except Exception:
+            pass
+        loading_panel = None
+
+    root.deiconify()
+
+    dialog = tk.Toplevel(root)
+    dialog.title("Backend unavailable")
+    dialog.configure(bg="#111827")
+    dialog.attributes("-topmost", True)
+    dialog.resizable(False, False)
+    dialog.geometry("520x230")
+
+    screen_w = root.winfo_screenwidth()
+    screen_h = root.winfo_screenheight()
+    x = max(0, (screen_w - 520) // 2)
+    y = max(0, (screen_h - 230) // 2)
+    dialog.geometry(f"+{x}+{y}")
+
+    main_frame = tk.Frame(dialog, bg="#111827")
+    main_frame.pack(fill=tk.BOTH, expand=True, padx=22, pady=18)
+
+    tk.Label(
+        main_frame,
+        text="The hosted proxy could not be reached.",
+        bg="#111827",
+        fg="#00ffcc",
+        font=("Arial", 14, "bold"),
+        wraplength=460,
+        justify=tk.LEFT,
+        anchor="w",
+    ).pack(anchor="w")
+
+    tk.Label(
+        main_frame,
+        text=message,
+        bg="#111827",
+        fg="#D1D5DB",
+        font=("Arial", 10),
+        wraplength=460,
+        justify=tk.LEFT,
+        anchor="w",
+    ).pack(anchor="w", pady=(10, 16))
+
+    def go_back():
+        try:
+            dialog.destroy()
+        except Exception:
+            pass
+        reset_to_prompt()
+
+    tk.Button(
+        main_frame,
+        text="Go Back",
+        bg="#00ffcc",
+        fg="black",
+        font=("Arial", 11, "bold"),
+        relief=tk.FLAT,
+        cursor="hand2",
+        command=go_back,
+        pady=8,
+    ).pack(anchor="e")
+
+    dialog.protocol("WM_DELETE_WINDOW", go_back)
+    dialog.bind("<Return>", lambda e: go_back())
+    dialog.grab_set()
+
+
+def show_direct_key_retry_dialog(message):
+    global loading_panel
+
+    if loading_panel and loading_panel.winfo_exists():
+        try:
+            loading_panel.destroy()
+        except Exception:
+            pass
+        loading_panel = None
+
+    root.deiconify()
+
+    dialog = tk.Toplevel(root)
+    dialog.title("Direct key failed")
+    dialog.configure(bg="#111827")
+    dialog.attributes("-topmost", True)
+    dialog.resizable(False, False)
+    dialog.geometry("560x260")
+
+    screen_w = root.winfo_screenwidth()
+    screen_h = root.winfo_screenheight()
+    x = max(0, (screen_w - 560) // 2)
+    y = max(0, (screen_h - 260) // 2)
+    dialog.geometry(f"+{x}+{y}")
+
+    main_frame = tk.Frame(dialog, bg="#111827")
+    main_frame.pack(fill=tk.BOTH, expand=True, padx=22, pady=18)
+
+    tk.Label(
+        main_frame,
+        text="Your direct API key attempt could not complete the request.",
+        bg="#111827",
+        fg="#00ffcc",
+        font=("Arial", 14, "bold"),
+        wraplength=500,
+        justify=tk.LEFT,
+        anchor="w",
+    ).pack(anchor="w")
+
+    tk.Label(
+        main_frame,
+        text=message,
+        bg="#111827",
+        fg="#D1D5DB",
+        font=("Arial", 10),
+        wraplength=500,
+        justify=tk.LEFT,
+        anchor="w",
+    ).pack(anchor="w", pady=(10, 16))
+
+    button_row = tk.Frame(main_frame, bg="#111827")
+    button_row.pack(fill=tk.X, side=tk.BOTTOM)
+
+    def go_back():
+        try:
+            dialog.destroy()
+        except Exception:
+            pass
+        reset_to_prompt()
+
+    def try_proxy_server():
+        request = last_analysis_request or {}
+        if not request:
+            go_back()
+            return
+
+        try:
+            dialog.destroy()
+        except Exception:
+            pass
+
+        launch_analysis_thread(
+            request.get("user_prompt"),
+            request.get("image_obj"),
+            request.get("snip_coords"),
+            request.get("screen_size"),
+            previous_context=request.get("previous_context"),
+            is_continuation=bool(request.get("is_continuation")),
+            force_proxy=True,
+            api_keys_override={},
+        )
+
+    tk.Button(
+        button_row,
+        text="Go Back",
+        bg="#374151",
+        fg="white",
+        font=("Arial", 11, "bold"),
+        relief=tk.FLAT,
+        cursor="hand2",
+        command=go_back,
+        pady=8,
+    ).pack(side=tk.RIGHT, padx=(8, 0))
+
+    tk.Button(
+        button_row,
+        text="Try Main Proxy Server",
+        bg="#00ffcc",
+        fg="black",
+        font=("Arial", 11, "bold"),
+        relief=tk.FLAT,
+        cursor="hand2",
+        command=try_proxy_server,
+        pady=8,
+    ).pack(side=tk.RIGHT)
+
+    dialog.protocol("WM_DELETE_WINDOW", go_back)
+    dialog.bind("<Return>", lambda e: try_proxy_server())
+    dialog.grab_set()
 
 
 # ==========================================
@@ -562,7 +1156,7 @@ def show_history_window():
 # UI: PROMPT WINDOW
 # ==========================================
 def show_prompt_window():
-    global prompt_win, initial_screenshot, current_lang, current_secret_code, debug_limit_enabled
+    global prompt_win, initial_screenshot, current_lang, current_secret_code, debug_limit_enabled, current_proxy_url, current_api_keys
     if prompt_win:
         prompt_win.destroy()
     initial_screenshot = None
@@ -573,7 +1167,7 @@ def show_prompt_window():
     screen_h = root.winfo_screenheight()
     win_w = max(500, min(760, screen_w - 40))
     collapsed_h = max(360, min(430, int(screen_h * 0.46)))
-    expanded_h = min(screen_h - 40, collapsed_h + 190)
+    expanded_h = min(screen_h - 40, collapsed_h + 330)
     current_h = collapsed_h
     prompt_win.geometry(f"{win_w}x{current_h}")
     prompt_win.configure(bg="#111827")
@@ -644,9 +1238,8 @@ def show_prompt_window():
 
     def send_prompt(text):
         prompt_win.destroy()
-        show_loading_ui()
         screen_size = (root.winfo_screenwidth(), root.winfo_screenheight())
-        threading.Thread(target=execute_analysis, args=(text, initial_screenshot, None, screen_size), daemon=True).start()
+        launch_analysis_thread(text, initial_screenshot, None, screen_size)
 
     def on_send():
         text = entry.get().strip()
@@ -654,19 +1247,15 @@ def show_prompt_window():
             return
         captured_image = capture_current_screen_for_prompt()
         if skip_preview_enabled:
-            prompt_win.destroy()
-            show_loading_ui()
             screen_size = (root.winfo_screenwidth(), root.winfo_screenheight())
-            threading.Thread(target=execute_analysis, args=(text, captured_image, None, screen_size), daemon=True).start()
+            launch_analysis_thread(text, captured_image, None, screen_size)
         else:
-            prompt_win.destroy()
             show_disclosure_window(text, None, captured_image)
 
     def on_snip():
         text = entry.get().strip()
         if text and text != t("placeholder"):
             captured_image = capture_current_screen_for_prompt()
-            prompt_win.destroy()
             begin_snipping_mode(text, captured_image)
 
     def on_cancel():
@@ -720,7 +1309,21 @@ def show_prompt_window():
     tk.Button(btn_frame2, text="Import Guide", bg="#10B981", fg="white", font=("Arial", 9, "bold"), relief=tk.FLAT, command=on_import, cursor="hand2", pady=6).pack(side=tk.RIGHT, expand=True, fill=tk.X, padx=(5, 0))
 
     extra_settings_visible = tk.BooleanVar(value=False)
-    extra_settings_frame = tk.Frame(prompt_win, bg="#111827")
+    extra_settings_shell = tk.Frame(prompt_win, bg="#111827")
+    extra_settings_canvas = tk.Canvas(extra_settings_shell, bg="#111827", highlightthickness=0, height=max(180, min(300, screen_h - 420)))
+    extra_settings_scrollbar = ttk.Scrollbar(extra_settings_shell, orient="vertical", command=extra_settings_canvas.yview)
+    extra_settings_frame = tk.Frame(extra_settings_canvas, bg="#111827")
+
+    extra_settings_frame.bind(
+        "<Configure>",
+        lambda e: extra_settings_canvas.configure(scrollregion=extra_settings_canvas.bbox("all"))
+    )
+    extra_settings_window = extra_settings_canvas.create_window((0, 0), window=extra_settings_frame, anchor="nw")
+    extra_settings_canvas.bind(
+        "<Configure>",
+        lambda e: extra_settings_canvas.itemconfig(extra_settings_window, width=e.width)
+    )
+    extra_settings_canvas.configure(yscrollcommand=extra_settings_scrollbar.set)
 
     def sync_secret_code(*_args):
         global current_secret_code
@@ -734,19 +1337,43 @@ def show_prompt_window():
         global skip_preview_enabled
         skip_preview_enabled = bool(skip_preview_var.get())
 
+    def sync_proxy_url(*_args):
+        global current_proxy_url
+        current_proxy_url = proxy_url_var.get().strip()
+        save_app_settings({"proxy_url": current_proxy_url})
+
+    def sync_api_keys(*_args):
+        global current_api_keys
+        current_api_keys = {
+            "gemini": gemini_key_var.get().strip(),
+            "openai": openai_key_var.get().strip(),
+            "groq": groq_key_var.get().strip(),
+            "gemini_backup": gemini_backup_var.get().strip(),
+        }
+        save_app_settings({"api_keys": current_api_keys})
+
     def update_extra_settings():
         if extra_settings_visible.get():
-            extra_settings_frame.pack(fill=tk.X, padx=20, pady=(0, 10))
+            extra_settings_shell.pack(fill=tk.X, padx=20, pady=(0, 10))
+            extra_settings_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            extra_settings_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
             extra_toggle_btn.config(text=f"▾ {t('extra_settings')}")
             set_window_height(True)
         else:
-            extra_settings_frame.pack_forget()
+            extra_settings_shell.pack_forget()
             extra_toggle_btn.config(text=f"▸ {t('extra_settings')}")
             set_window_height(False)
 
     def toggle_extra_settings():
         extra_settings_visible.set(not extra_settings_visible.get())
         update_extra_settings()
+
+    def scroll_extra_settings(event):
+        if not extra_settings_visible.get():
+            return
+        extra_settings_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+    prompt_win.bind_all("<MouseWheel>", scroll_extra_settings)
 
     extra_toggle_btn = tk.Button(prompt_win, text=f"▸ {t('extra_settings')}", bg="#1F2937", fg="#D1D5DB", font=("Arial", 9, "bold"), relief=tk.FLAT, command=toggle_extra_settings, cursor="hand2", pady=6)
     extra_toggle_btn.pack(fill=tk.X, padx=20, pady=(0, 8))
@@ -771,14 +1398,52 @@ def show_prompt_window():
     skip_preview_help_lbl = tk.Label(skip_preview_text, text=t("skip_preview_help"), bg="#111827", fg="#6B7280", font=("Arial", 8), wraplength=max(300, win_w - 180), justify=tk.LEFT)
     skip_preview_help_lbl.pack(anchor="w", pady=(2, 0))
 
+    tk.Label(extra_settings_frame, text=t("proxy_url"), bg="#111827", fg="#9CA3AF", font=("Arial", 10, "bold")).pack(anchor="w", pady=(0, 4))
+
+    proxy_url_var = tk.StringVar(value=current_proxy_url)
+    proxy_url_entry = tk.Entry(extra_settings_frame, textvariable=proxy_url_var, font=("Arial", 11), bg="#1F2937", fg="white", insertbackground="white", relief=tk.FLAT)
+    proxy_url_entry.pack(fill=tk.X, pady=(0, 4), ipady=7)
+    tk.Label(extra_settings_frame, text=t("proxy_url_help"), bg="#111827", fg="#6B7280", font=("Arial", 8), wraplength=max(300, win_w - 80), justify=tk.LEFT).pack(anchor="w", pady=(0, 10))
+
+    # API key overrides are optional; when filled, they replace the built-in proxy keys for that backend.
+    tk.Label(extra_settings_frame, text=t("api_keys_section"), bg="#111827", fg="#9CA3AF", font=("Arial", 10, "bold")).pack(anchor="w", pady=(0, 4))
+    tk.Label(extra_settings_frame, text=t("api_keys_help"), bg="#111827", fg="#6B7280", font=("Arial", 8), wraplength=max(300, win_w - 80), justify=tk.LEFT).pack(anchor="w", pady=(0, 8))
+
+    gemini_key_var = tk.StringVar(value=current_api_keys.get("gemini", ""))
+    tk.Label(extra_settings_frame, text=t("gemini_api_key"), bg="#111827", fg="#9CA3AF", font=("Arial", 9, "bold")).pack(anchor="w")
+    gemini_key_entry = tk.Entry(extra_settings_frame, textvariable=gemini_key_var, font=("Arial", 11), bg="#1F2937", fg="white", insertbackground="white", relief=tk.FLAT, show="*")
+    gemini_key_entry.pack(fill=tk.X, pady=(4, 8), ipady=7)
+
+    openai_key_var = tk.StringVar(value=current_api_keys.get("openai", ""))
+    tk.Label(extra_settings_frame, text=t("openai_api_key"), bg="#111827", fg="#9CA3AF", font=("Arial", 9, "bold")).pack(anchor="w")
+    openai_key_entry = tk.Entry(extra_settings_frame, textvariable=openai_key_var, font=("Arial", 11), bg="#1F2937", fg="white", insertbackground="white", relief=tk.FLAT, show="*")
+    openai_key_entry.pack(fill=tk.X, pady=(4, 8), ipady=7)
+
+    groq_key_var = tk.StringVar(value=current_api_keys.get("groq", ""))
+    tk.Label(extra_settings_frame, text=t("groq_api_key"), bg="#111827", fg="#9CA3AF", font=("Arial", 9, "bold")).pack(anchor="w")
+    groq_key_entry = tk.Entry(extra_settings_frame, textvariable=groq_key_var, font=("Arial", 11), bg="#1F2937", fg="white", insertbackground="white", relief=tk.FLAT, show="*")
+    groq_key_entry.pack(fill=tk.X, pady=(4, 8), ipady=7)
+
+    gemini_backup_var = tk.StringVar(value=current_api_keys.get("gemini_backup", ""))
+    tk.Label(extra_settings_frame, text=t("gemini_backup_key"), bg="#111827", fg="#9CA3AF", font=("Arial", 9, "bold")).pack(anchor="w")
+    gemini_backup_entry = tk.Entry(extra_settings_frame, textvariable=gemini_backup_var, font=("Arial", 11), bg="#1F2937", fg="white", insertbackground="white", relief=tk.FLAT, show="*")
+    gemini_backup_entry.pack(fill=tk.X, pady=(4, 10), ipady=7)
+
     tk.Label(extra_settings_frame, text=t("secret_dev"), bg="#111827", fg="#9CA3AF", font=("Arial", 10, "bold")).pack(anchor="w")
 
     secret_var = tk.StringVar(value=current_secret_code)
     secret_entry = tk.Entry(extra_settings_frame, textvariable=secret_var, font=("Arial", 12), bg="#1F2937", fg="white", insertbackground="white", relief=tk.FLAT, show="*")
     secret_entry.pack(fill=tk.X, pady=(4, 8), ipady=8)
 
+    proxy_url_var.trace_add("write", sync_proxy_url)
+    gemini_key_var.trace_add("write", sync_api_keys)
+    openai_key_var.trace_add("write", sync_api_keys)
+    groq_key_var.trace_add("write", sync_api_keys)
+    gemini_backup_var.trace_add("write", sync_api_keys)
     secret_var.trace_add("write", sync_secret_code)
     sync_secret_code()
+    sync_proxy_url()
+    sync_api_keys()
     sync_debug_mode()
     sync_skip_preview_mode()
     update_extra_settings()
@@ -875,9 +1540,8 @@ def show_continue_window(preview_image=None):
         text = entry.get().strip()
         if text:
             prompt_win.destroy()
-            show_loading_ui()
             screen_size = (root.winfo_screenwidth(), root.winfo_screenheight())
-            threading.Thread(target=execute_analysis, args=(text, initial_screenshot, None, screen_size, last_user_prompt, True), daemon=True).start()
+            launch_analysis_thread(text, initial_screenshot, None, screen_size, last_user_prompt, True)
             
     def on_cancel():
         prompt_win.destroy()
@@ -997,9 +1661,8 @@ def show_disclosure_window(prompt_text, snip_coords, original_img):
     
     def on_accept():
         disclosure_win.destroy()
-        show_loading_ui()
         screen_size = (root.winfo_screenwidth(), root.winfo_screenheight())
-        threading.Thread(target=execute_analysis, args=(prompt_text, full_img_to_send, snip_coords, screen_size), daemon=True).start()
+        launch_analysis_thread(prompt_text, full_img_to_send, snip_coords, screen_size)
         
     def on_back():
         disclosure_win.destroy()

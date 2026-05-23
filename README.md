@@ -2,6 +2,8 @@
 
 Blueprint Lens is a Windows desktop app that captures screenshots and turns them into step-by-step AI guidance. It is a student project, and the simplest way to use it is to download the `.exe` and run it.
 
+**Important:** If the main hosted server is down or unreachable, you can still use the tool by entering your own API keys in `Extra settings`. Add a Gemini key first, or use the OpenAI and Groq overrides if you prefer those backends.
+
 ## What it does
 
 - Opens a prompt window on launch
@@ -81,7 +83,13 @@ The prompt window should appear immediately after launch. If you are using the `
 4. Use `View History` to reopen saved guides.
 5. Use `Import Guide` to load a previously exported `.cguide` or `.json` file.
 6. Press `Enter` to send faster. If skip preview is off, the app shows a confirmation screen and you press `Enter` again to confirm.
-7. Open `Extra settings` only when you need developer controls like the secret code, debug limit, or skip preview.
+7. Open `Extra settings` when you need developer controls like the secret code, debug limit, skip preview, the backend URL, or API key overrides.
+
+If the hosted main server goes offline, the fastest recovery path is to open `Extra settings` and fill in your own API keys. The app will use your keys directly instead of relying on the hosted bridge.
+
+If you still want to use a custom bridge, change the Backend URL in `Extra settings`. The app saves that value locally in `app_settings.json`, and you can also preconfigure it with the `BLUEPRINT_PROXY_URL` environment variable.
+
+The API key override slots let your own keys replace the built-in service keys for Gemini, OpenAI, and Groq. The fourth slot is a backup Gemini key for failover.
 
 ## Hotkey behavior
 
@@ -93,6 +101,7 @@ The prompt window should appear immediately after launch. If you are using the `
 ## Files
 
 - `contextual_ai_app.py` is the main app.
+- `app_settings.json` stores local app settings such as the backend URL.
 - `saved_history.json` stores your local guide history.
 - `output/` is used for generated output.
 - `contextual_ai_app.spec` is the PyInstaller build recipe for the executable.
@@ -101,6 +110,7 @@ The prompt window should appear immediately after launch. If you are using the `
 ## Notes
 
 - The app relies on a remote AI service for analysis, so internet access is required.
+- If the main hosted server is unavailable, enter your own API keys in `Extra settings` to keep using the tool.
 - Closing the app window exits the program.
 - If you start it from a terminal and close the terminal, the app process ends with it.
 - `Ctrl+Shift+Q` opens the quick screenshot flow while the app is still running.

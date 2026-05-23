@@ -1,0 +1,9 @@
+{
+  "proxy_url": "",
+  "api_keys": {
+    "gemini": "",
+    "openai": "",
+    "groq": "",
+    "gemini_backup": ""
+  }
+}
